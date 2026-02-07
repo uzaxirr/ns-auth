@@ -17,20 +17,21 @@ export function TagInput({ values, onChange, placeholder, validate }: TagInputPr
   const inputRef = useRef<HTMLInputElement>(null)
 
   const addTag = (raw: string) => {
-    const value = raw.trim()
-    if (!value) return
-    if (values.includes(value)) {
-      setError("Already added")
-      return
-    }
-    if (validate) {
-      const err = validate(value)
-      if (err) {
-        setError(err)
-        return
+    const parts = raw.split(/[\s,]+/).filter(Boolean)
+    if (parts.length === 0) return
+    const newValues = [...values]
+    for (const part of parts) {
+      if (newValues.includes(part)) continue
+      if (validate) {
+        const err = validate(part)
+        if (err) {
+          setError(err)
+          return
+        }
       }
+      newValues.push(part)
     }
-    onChange([...values, value])
+    onChange(newValues)
     setInput("")
     setError(null)
   }
