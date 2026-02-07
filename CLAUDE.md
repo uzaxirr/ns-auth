@@ -227,13 +227,27 @@ curl -s -X POST "https://backboard.railway.com/graphql/v2" \
 
 ### Railway Gotchas
 
-- **`railway up` always uploads from git repo root** — it ignores `cwd`. Use `rootDirectory` in the service settings to scope the build to a subdirectory.
-- **Setting `rootDirectory`** requires the GraphQL API: `mutation { serviceInstanceUpdate(input: { rootDirectory: "demo-app" }, serviceId: "...", environmentId: "...") }`
+- **`railway up` always uploads from git repo root** — it ignores `cwd`. Use `rootDirectory` in the service settings to scope the build to a subdirectory. **CRITICAL: always run `railway up` from the repo root (`/Users/uzaxirr/work/oauth/`), NOT from a subdirectory.** If you run from e.g. `frontend/`, Railway will upload only that dir's contents and the `rootDirectory: "frontend"` lookup will fail with "Could not find root directory: frontend."
+- **`rootDirectory` must be set for all services** — Without it, Railway sees the entire monorepo and can't detect the app type. Set via GraphQL API: `mutation { serviceInstanceUpdate(input: { rootDirectory: "backend" }, serviceId: "...", environmentId: "...") }`. Current values: backend → `"backend"`, frontend → `"frontend"`, demo-app → `"demo-app"`.
+- **Setting `rootDirectory`** requires the GraphQL API — the Railway CLI doesn't support it directly.
 - **Never set `NIXPACKS_PKGS` or `NIXPACKS_BUILD_CMD`** to invalid values — Nixpacks reads them as Nix expressions and the build will fail with cryptic errors like `undefined variable 'delete'`.
+- **Node version on Railway defaults to v18** — Privy SDK and Vite 7 require Node >=20. Set `NIXPACKS_NODE_VERSION=20` env var on Node services (frontend, demo-app), or add a `.node-version` file with `20` in the service's root directory.
+- **`npm ci` requires lock file in sync** — If `package-lock.json` is regenerated with a different Node/npm version, `npm ci` on Railway will fail with "Missing: ... from lock file". Fix: `rm -rf node_modules package-lock.json && npm install` from the correct subdirectory, then redeploy.
 - **`serve` must be a production dependency** (not devDependency) for the Nixpacks start command `npx serve dist -s` to work.
 - **CORS origins must be updated** when adding new service domains — both in the backend env var and the Privy dashboard's allowed origins.
 - **Production RSA keys** are stored as base64-encoded PEM in env vars (`OAUTH_RSA_PRIVATE_KEY`, `OAUTH_RSA_PUBLIC_KEY`), not as files. The backend's `security/keys.py` handles both modes.
 - **Alembic migrations run on deploy** — the backend's `railway.toml` start command runs `alembic upgrade head` before starting uvicorn.
+- **Changing Railway env vars can auto-trigger a redeploy** from the source (GitHub). If the service is not connected to a GitHub repo, these auto-triggered deploys will fail immediately with no build. Deploy via `railway up` instead.
+
+### Common Deployment Mistakes & Fixes
+
+| Mistake | Symptom | Fix |
+|---------|---------|-----|
+| Running `railway up` from subdirectory | "Could not find root directory: X" | Always run from repo root |
+| Missing `rootDirectory` setting | "Railpack could not determine how to build the app" (sees entire repo) | Set via GraphQL API |
+| Default Node v18 on Railway | `npm warn EBADENGINE` + build errors from Vite 7 / Privy SDK | Set `NIXPACKS_NODE_VERSION=20` env var |
+| Stale `package-lock.json` | `npm ci` fails: "Missing: zod@X.X.X from lock file" | Delete lock + `node_modules`, run `npm install` |
+| Backend deploys but old code runs | New endpoints return 404 | Check `railway deployment list` — deploy may have FAILED silently |
 
 ## Useful Commands
 
