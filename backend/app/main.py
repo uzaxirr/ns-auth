@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import apps, oauth, scopes, uploads, wellknown
+from app.routers import apps, auth, oauth, scopes, uploads, wellknown
 from app.security.keys import get_private_key
 
 
@@ -32,6 +32,7 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=settings.uploads_dir), name="uploads")
 
 app.include_router(apps.router)
+app.include_router(auth.router)
 app.include_router(oauth.router)
 app.include_router(scopes.router)
 app.include_router(uploads.router)

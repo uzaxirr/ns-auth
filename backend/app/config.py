@@ -16,7 +16,19 @@ class Settings(BaseSettings):
     rsa_private_key: Optional[str] = None  # base64-encoded PEM
     rsa_public_key: Optional[str] = None  # base64-encoded PEM
 
-    model_config = {"env_prefix": "OAUTH_"}
+    # Session management
+    session_secret: str = "change-me-64-chars-minimum-secret-key-for-session-tokens-here!!"
+    session_expiry_seconds: int = 86400  # 24 hours
+
+    # Authorization code flow
+    authorization_code_expiry_seconds: int = 600  # 10 minutes
+    frontend_url: str = "http://localhost:5173"
+
+    # Privy integration
+    privy_app_id: str = ""
+    privy_app_secret: str = ""
+
+    model_config = {"env_prefix": "OAUTH_", "env_file": ".env"}
 
 
 settings = Settings()

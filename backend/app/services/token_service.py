@@ -79,12 +79,81 @@ async def introspect_token(db: AsyncSession, token: str) -> Dict:
         "active": True,
         "scope": " ".join(record.scopes),
         "client_id": record.client_id,
+        "user_id": str(record.user_id) if record.user_id else None,
         "token_type": "Bearer",
         "exp": int(record.expires_at.timestamp()),
         "iat": int(record.created_at.timestamp()),
         "jti": record.jti,
         "iss": settings.issuer,
     }
+
+
+async def issue_user_token(
+    db: AsyncSession, app: OAuthApp, user_id: uuid.UUID, granted_scopes: List[str]
+) -> Tuple[str, int]:
+    now = datetime.now(timezone.utc)
+    exp = int(now.timestamp()) + settings.token_expiry_seconds
+    jti = str(uuid.uuid4())
+
+    claims = {
+        "iss": settings.issuer,
+        "sub": str(user_id),
+        "aud": app.client_id,
+        "exp": exp,
+        "iat": int(now.timestamp()),
+        "jti": jti,
+        "scope": " ".join(granted_scopes),
+        "client_id": app.client_id,
+        "user_id": str(user_id),
+    }
+
+    private_key = get_private_key()
+    token = jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": get_kid()})
+
+    token_record = AccessToken(
+        token_hash=hash_token(token),
+        jti=jti,
+        client_id=app.client_id,
+        user_id=user_id,
+        scopes=granted_scopes,
+        expires_at=datetime.fromtimestamp(exp, tz=timezone.utc),
+    )
+    db.add(token_record)
+    await db.commit()
+
+    return token, settings.token_expiry_seconds
+
+
+async def issue_id_token(
+    db: AsyncSession, app: OAuthApp, user: "User", granted_scopes: List[str]
+) -> str:
+    now = datetime.now(timezone.utc)
+    exp = int(now.timestamp()) + settings.token_expiry_seconds
+
+    claims = {
+        "iss": settings.issuer,
+        "sub": str(user.id),
+        "aud": app.client_id,
+        "exp": exp,
+        "iat": int(now.timestamp()),
+    }
+
+    if "email" in granted_scopes:
+        claims["email"] = user.email
+        claims["email_verified"] = True
+
+    if "profile" in granted_scopes:
+        claims["name"] = user.display_name
+        claims["picture"] = user.avatar_url
+
+    if "cohort" in granted_scopes:
+        claims["cohort"] = user.cohort
+
+    if "wallet" in granted_scopes:
+        claims["wallet_address"] = user.wallet_address
+
+    private_key = get_private_key()
+    return jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": get_kid()})
 
 
 async def revoke_token(db: AsyncSession, token: str) -> bool:

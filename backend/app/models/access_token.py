@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -18,6 +18,9 @@ class AccessToken(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     jti: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     client_id: Mapped[str] = mapped_column(String(64), ForeignKey("oauth_apps.client_id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     scopes: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)

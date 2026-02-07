@@ -1,0 +1,5 @@
+export const OAUTH_SERVER = import.meta.env.VITE_OAUTH_SERVER || "http://localhost:8000"
+export const CLIENT_ID = import.meta.env.VITE_CLIENT_ID || ""
+export const CLIENT_SECRET = import.meta.env.VITE_CLIENT_SECRET || ""
+export const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || "http://localhost:3000/callback"
+export const SCOPES = import.meta.env.VITE_SCOPES || "openid profile email cohort socials wallet"

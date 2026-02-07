@@ -10,6 +10,13 @@ backend/.venv/
 frontend/node_modules/
 frontend/dist/
 
+# Demo app
+demo-app/node_modules/
+demo-app/dist/
+
+# IDE
+.idea/
+
 # General
 .env
 *.env.local
