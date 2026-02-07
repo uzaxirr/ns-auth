@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ConfirmDialog } from "@/components/ui/dialog"
 import { CredentialDisplay } from "@/components/apps/CredentialDisplay"
 import { ApiPlayground } from "@/components/apps/ApiPlayground"
-import { api } from "@/lib/api"
+import { api, API_BASE } from "@/lib/api"
 import type { OAuthApp } from "@/lib/api"
 
 export function AppDetail() {
@@ -135,7 +135,7 @@ export function AppDetail() {
         </CardHeader>
         <CardContent>
           <pre className="rounded-md bg-secondary p-4 text-xs font-mono whitespace-pre-wrap break-all">
-{`curl -X POST http://localhost:8000/oauth/token \\
+{`curl -X POST ${API_BASE}/oauth/token \\
   -d "grant_type=client_credentials" \\
   -d "client_id=${app.client_id}" \\
   -d "client_secret=YOUR_SECRET"`}
