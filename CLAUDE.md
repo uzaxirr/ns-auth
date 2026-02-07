@@ -150,6 +150,7 @@ Frontend needs `VITE_PRIVY_APP_ID` and `VITE_API_BASE` in `frontend/.env`.
 - **Privy JWT** only contains `sub` (DID) — email must be fetched separately from Privy Server API (`GET /api/v1/users/{did}`)
 - **JIT user provisioning**: Users are created on first login via Privy. Email is fetched from Privy API and stored. Profile fields (cohort, bio, socials, wallet) start empty and are filled via seed scripts or admin tools.
 - **RSA keys** auto-generate on first backend startup into `backend/keys/`
+- **Cross-origin session cookies**: In production (HTTPS), session cookies use `SameSite=None; Secure=True` because the frontend and backend are on different Railway domains. Without this, the session cookie won't be sent in cross-origin requests (consent approval, `/auth/me`). The `session_service.py` auto-detects production mode by checking if `settings.issuer` starts with `https`.
 - **`POST /auth/dev/login-as`** endpoint exists for testing — creates sessions without Privy OTP. Remove before production.
 
 ## Deployment (Railway)
@@ -248,6 +249,7 @@ curl -s -X POST "https://backboard.railway.com/graphql/v2" \
 | Default Node v18 on Railway | `npm warn EBADENGINE` + build errors from Vite 7 / Privy SDK | Set `NIXPACKS_NODE_VERSION=20` env var |
 | Stale `package-lock.json` | `npm ci` fails: "Missing: zod@X.X.X from lock file" | Delete lock + `node_modules`, run `npm install` |
 | Backend deploys but old code runs | New endpoints return 404 | Check `railway deployment list` — deploy may have FAILED silently |
+| Session cookie `SameSite=Lax` in production | Consent "Allow" does nothing, `/auth/me` returns `{}` | Use `SameSite=None; Secure=True` for cross-domain (already auto-detected in `session_service.py`) |
 
 ## Useful Commands
 

@@ -34,12 +34,13 @@ def verify_session_token(token: str) -> Optional[UUID]:
 
 
 def set_session_cookie(response: Response, token: str) -> None:
+    is_production = settings.issuer.startswith("https")
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=False,  # False for localhost dev
-        samesite="lax",
+        secure=is_production,
+        samesite="none" if is_production else "lax",
         max_age=settings.session_expiry_seconds,
         path="/",
     )
