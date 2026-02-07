@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { toast } from "sonner"
 import {
   KeyRound,
@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { ConfirmDialog } from "@/components/ui/dialog"
 import { api } from "@/lib/api"
-import type { IntrospectResponse } from "@/lib/api"
+import type { IntrospectResponse, ScopeDefinition } from "@/lib/api"
 import { decodeJWT, formatTimestamp, isTokenExpired } from "@/lib/jwt"
 import type { DecodedJWT } from "@/lib/jwt"
 import { cn } from "@/lib/utils"
@@ -203,7 +203,8 @@ function IntrospectionView({
 
 export function ApiPlayground({ clientId, scopes = [] }: ApiPlaygroundProps) {
   const [clientSecret, setClientSecret] = useState("")
-  const [scope, setScope] = useState(scopes.join(" "))
+  const [allScopes, setAllScopes] = useState<ScopeDefinition[]>([])
+  const [selectedScopes, setSelectedScopes] = useState<string[]>([...scopes])
   const [token, setToken] = useState("")
   const [decoded, setDecoded] = useState<DecodedJWT | null>(null)
   const [activeStep, setActiveStep] = useState(1)
@@ -217,6 +218,16 @@ export function ApiPlayground({ clientId, scopes = [] }: ApiPlaygroundProps) {
 
   const hasToken = !!token
 
+  // Fetch available scopes, filtered to app's allowed scopes
+  useEffect(() => {
+    api.getScopes().then((all) => {
+      const filtered = scopes.length > 0
+        ? all.filter((s) => scopes.includes(s.name))
+        : all
+      setAllScopes(filtered)
+    }).catch(() => {})
+  }, [scopes])
+
   const requestToken = async () => {
     setLoading("token")
     setError("")
@@ -225,7 +236,8 @@ export function ApiPlayground({ clientId, scopes = [] }: ApiPlaygroundProps) {
     setIntrospection(null)
     setRevoked(false)
     try {
-      const res = await api.getToken(clientId, clientSecret, scope || undefined)
+      const scopeStr = selectedScopes.join(" ")
+      const res = await api.getToken(clientId, clientSecret, scopeStr || undefined)
       if ("error" in res) {
         setError((res as unknown as { error_description: string }).error_description)
         return
@@ -306,14 +318,41 @@ export function ApiPlayground({ clientId, scopes = [] }: ApiPlaygroundProps) {
                   onChange={(e) => setClientSecret(e.target.value)}
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Scope (optional)</label>
-                <Input
-                  placeholder={scopes.length ? scopes.join(" ") : "e.g. read write"}
-                  value={scope}
-                  onChange={(e) => setScope(e.target.value)}
-                />
-              </div>
+              {allScopes.length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Scopes</label>
+                  <div className="rounded-md border border-input divide-y divide-border">
+                    {allScopes.map((s) => {
+                      const checked = selectedScopes.includes(s.name)
+                      return (
+                        <label
+                          key={s.name}
+                          className={cn(
+                            "flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors text-sm",
+                            "hover:bg-secondary/50",
+                            checked && "bg-secondary/30"
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedScopes((prev) =>
+                                prev.includes(s.name)
+                                  ? prev.filter((x) => x !== s.name)
+                                  : [...prev, s.name]
+                              )
+                            }}
+                            className="h-3.5 w-3.5 rounded border-input accent-primary"
+                          />
+                          <span className="font-mono">{s.name}</span>
+                          <span className="text-xs text-muted-foreground">{s.description}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               {error && (
                 <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3 text-sm text-red-400">
                   {error}

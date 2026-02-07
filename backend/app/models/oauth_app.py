@@ -21,6 +21,8 @@ class OAuthApp(Base):
     client_secret_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     scopes: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     redirect_uris: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
+    icon_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    privacy_policy_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

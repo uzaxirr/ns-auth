@@ -12,6 +12,17 @@ class OAuthAppCreate(BaseModel):
     description: Optional[str] = None
     scopes: List[str] = []
     redirect_uris: List[str] = []
+    icon_url: Optional[str] = None
+    privacy_policy_url: Optional[str] = None
+
+
+class OAuthAppUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    scopes: Optional[List[str]] = None
+    redirect_uris: Optional[List[str]] = None
+    icon_url: Optional[str] = None
+    privacy_policy_url: Optional[str] = None
 
 
 class OAuthAppResponse(BaseModel):
@@ -21,6 +32,8 @@ class OAuthAppResponse(BaseModel):
     client_id: str
     scopes: List[str]
     redirect_uris: List[str]
+    icon_url: Optional[str]
+    privacy_policy_url: Optional[str]
     created_at: datetime
     updated_at: datetime
 

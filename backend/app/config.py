@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     token_expiry_seconds: int = 3600
     issuer: str = "http://localhost:8000"
     keys_dir: str = "keys"
+    uploads_dir: str = "uploads"
     rsa_private_key: Optional[str] = None  # base64-encoded PEM
     rsa_public_key: Optional[str] = None  # base64-encoded PEM
 

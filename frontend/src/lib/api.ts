@@ -13,11 +13,28 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
+export interface ScopeDefinition {
+  name: string
+  description: string
+  claims: string[]
+}
+
 export interface OAuthAppCreate {
   name: string
   description?: string
   scopes?: string[]
   redirect_uris?: string[]
+  icon_url?: string
+  privacy_policy_url?: string
+}
+
+export interface OAuthAppUpdate {
+  name?: string
+  description?: string
+  scopes?: string[]
+  redirect_uris?: string[]
+  icon_url?: string
+  privacy_policy_url?: string
 }
 
 export interface OAuthApp {
@@ -27,6 +44,8 @@ export interface OAuthApp {
   client_id: string
   scopes: string[]
   redirect_uris: string[]
+  icon_url: string | null
+  privacy_policy_url: string | null
   created_at: string
   updated_at: string
 }
@@ -54,6 +73,8 @@ export interface IntrospectResponse {
 }
 
 export const api = {
+  getScopes: () => request<ScopeDefinition[]>("/api/scopes/"),
+
   createApp: (data: OAuthAppCreate) =>
     request<OAuthAppCreated>("/api/apps/", { method: "POST", body: JSON.stringify(data) }),
 
@@ -62,6 +83,9 @@ export const api = {
   getApp: (id: string) => request<OAuthApp>(`/api/apps/${id}`),
 
   deleteApp: (id: string) => request<void>(`/api/apps/${id}`, { method: "DELETE" }),
+
+  updateApp: (id: string, data: OAuthAppUpdate) =>
+    request<OAuthApp>(`/api/apps/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
 
   getToken: (clientId: string, clientSecret: string, scope?: string) => {
     const body = new URLSearchParams({
@@ -94,4 +118,21 @@ export const api = {
       body,
     }).then(r => r.json())
   },
+
+  uploadAppIcon: async (appId: string, file: File): Promise<OAuthApp> => {
+    const formData = new FormData()
+    formData.append("file", file)
+    const res = await fetch(`${API_BASE}/api/apps/${appId}/icon`, {
+      method: "POST",
+      body: formData,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || `Upload failed: ${res.status}`)
+    }
+    return res.json()
+  },
+
+  deleteAppIcon: (appId: string) =>
+    request<OAuthApp>(`/api/apps/${appId}/icon`, { method: "DELETE" }),
 }
