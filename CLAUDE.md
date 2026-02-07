@@ -152,6 +152,89 @@ Frontend needs `VITE_PRIVY_APP_ID` and `VITE_API_BASE` in `frontend/.env`.
 - **RSA keys** auto-generate on first backend startup into `backend/keys/`
 - **`POST /auth/dev/login-as`** endpoint exists for testing — creates sessions without Privy OTP. Remove before production.
 
+## Deployment (Railway)
+
+Project: **cus-auth** on Railway. Three services + one PostgreSQL database.
+
+### Live URLs
+
+| Service | URL |
+|---------|-----|
+| Backend | https://backend-production-c59b.up.railway.app |
+| Frontend (Admin) | https://frontend-production-a6eb.up.railway.app |
+| Demo App | https://demo-app-production-9550.up.railway.app |
+
+### Service Architecture
+
+Each service has a `railway.toml` in its directory:
+- **backend** — Nixpacks Python build, runs Alembic migrations then uvicorn
+- **frontend** — Nixpacks Node build, serves static `dist/` via `npx serve`
+- **demo-app** — Nixpacks Node build, serves static `dist/` via `npx serve`
+
+PostgreSQL is Railway-managed, accessible via internal hostname `postgres.railway.internal`.
+
+### Deploying
+
+```bash
+# Deploy all services (from project root)
+railway up --service backend --detach
+railway up --service frontend --detach
+railway up --service demo-app --detach
+```
+
+Each service's `rootDirectory` is configured in Railway's service settings (not via env vars). `railway up` uploads from the git repo root — Railway uses the `rootDirectory` setting to scope the build.
+
+### Railway Environment Variables
+
+**Backend** (`--service backend`):
+- `OAUTH_DATABASE_URL` — async PostgreSQL connection string (set by Railway)
+- `OAUTH_DATABASE_URL_SYNC` — sync PostgreSQL connection string (for Alembic)
+- `OAUTH_ISSUER` — Backend public URL
+- `OAUTH_RSA_PRIVATE_KEY` / `OAUTH_RSA_PUBLIC_KEY` — Base64-encoded PEM keys (production uses env vars, not files)
+- `OAUTH_PRIVY_APP_ID` / `OAUTH_PRIVY_APP_SECRET`
+- `OAUTH_SESSION_SECRET`
+- `OAUTH_CORS_ORIGINS` — JSON array of allowed origins (must include frontend + demo-app URLs)
+- `OAUTH_FRONTEND_URL` — Frontend URL for redirects
+
+**Frontend** (`--service frontend`):
+- `VITE_API_BASE` — Backend URL
+- `VITE_PRIVY_APP_ID` — Privy app ID for login modal
+
+**Demo App** (`--service demo-app`):
+- `VITE_OAUTH_SERVER` — Backend URL
+- `VITE_CLIENT_ID` / `VITE_CLIENT_SECRET` — OAuth app credentials (registered on the production backend)
+- `VITE_REDIRECT_URI` — Demo app callback URL
+- `VITE_SCOPES` — Space-separated scope list
+
+### Railway CLI Cheatsheet
+
+```bash
+railway variables --service <name>                  # List all vars
+railway variables --set "KEY=val" --service <name>   # Set var
+railway variables --set "K1=v1" --set "K2=v2" ...    # Set multiple
+railway domain --service <name>                      # Get/create domain
+railway service status                               # Check deploy status
+railway up --service <name> --detach                 # Deploy
+```
+
+To delete a variable, use the GraphQL API (CLI has no delete command):
+```bash
+TOKEN=$(python3 -c "import json; d=json.load(open('$HOME/.railway/config.json')); print(d['user']['token'])")
+curl -s -X POST "https://backboard.railway.com/graphql/v2" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"query": "mutation { variableDelete(input: { name: \"VAR_NAME\", serviceId: \"...\", environmentId: \"...\", projectId: \"...\" }) }"}'
+```
+
+### Railway Gotchas
+
+- **`railway up` always uploads from git repo root** — it ignores `cwd`. Use `rootDirectory` in the service settings to scope the build to a subdirectory.
+- **Setting `rootDirectory`** requires the GraphQL API: `mutation { serviceInstanceUpdate(input: { rootDirectory: "demo-app" }, serviceId: "...", environmentId: "...") }`
+- **Never set `NIXPACKS_PKGS` or `NIXPACKS_BUILD_CMD`** to invalid values — Nixpacks reads them as Nix expressions and the build will fail with cryptic errors like `undefined variable 'delete'`.
+- **`serve` must be a production dependency** (not devDependency) for the Nixpacks start command `npx serve dist -s` to work.
+- **CORS origins must be updated** when adding new service domains — both in the backend env var and the Privy dashboard's allowed origins.
+- **Production RSA keys** are stored as base64-encoded PEM in env vars (`OAUTH_RSA_PRIVATE_KEY`, `OAUTH_RSA_PUBLIC_KEY`), not as files. The backend's `security/keys.py` handles both modes.
+- **Alembic migrations run on deploy** — the backend's `railway.toml` start command runs `alembic upgrade head` before starting uvicorn.
+
 ## Useful Commands
 
 ```bash
