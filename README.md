@@ -5,12 +5,12 @@ OAuth 2.0 / OpenID Connect identity provider for Network School. Lets third-part
 ## Architecture
 
 ```
-┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
-│  Frontend    │     │    Backend       │     │  Demo App   │
-│  (Admin UI)  │────▶│  (OAuth Server)  │◀────│  (Client)   │
-│  React/Vite  │     │  FastAPI         │     │  React/Vite │
-│  :5173       │     │  :8000           │     │  :3000      │
-└─────────────┘     └────────┬─────────┘     └─────────────┘
+┌─────────────┐     ┌─────────────────┐
+│  Frontend    │     │    Backend       │
+│  (Admin UI)  │────▶│  (OAuth Server)  │◀──── Third-party apps
+│  React/Vite  │     │  FastAPI         │
+│  :5173       │     │  :8000           │
+└─────────────┘     └────────┬─────────┘
                              │
                     ┌────────▼─────────┐
                     │   PostgreSQL     │
@@ -22,7 +22,6 @@ OAuth 2.0 / OpenID Connect identity provider for Network School. Lets third-part
 |---------|-------|------------|
 | Backend | http://localhost:8000 | https://backend-production-c59b.up.railway.app |
 | Frontend (Admin) | http://localhost:5173 | https://frontend-production-a6eb.up.railway.app |
-| Demo App | http://localhost:3000 | https://demo-app-production-9550.up.railway.app |
 
 ---
 
@@ -56,10 +55,6 @@ pip install -r requirements.txt
 # Frontend
 cd ../frontend
 npm install
-
-# Demo app
-cd ../demo-app
-npm install
 ```
 
 ### 3. Configure environment variables
@@ -80,7 +75,7 @@ OAUTH_PRIVY_APP_SECRET=<your privy app secret>
 OAUTH_SESSION_SECRET=<64+ character random string>
 
 # CORS & frontend
-OAUTH_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+OAUTH_CORS_ORIGINS=["http://localhost:5173"]
 OAUTH_FRONTEND_URL=http://localhost:5173
 ```
 
@@ -99,18 +94,6 @@ VITE_API_BASE=http://localhost:8000
 VITE_PRIVY_APP_ID=<same privy app id>
 ```
 
-**`demo-app/.env`**
-
-```env
-VITE_OAUTH_SERVER=http://localhost:8000
-VITE_CLIENT_ID=<client_id from registering an app>
-VITE_CLIENT_SECRET=<client_secret from registering an app>
-VITE_REDIRECT_URI=http://localhost:3000/callback
-VITE_SCOPES=openid profile email cohort socials wallet
-```
-
-> You'll get the `CLIENT_ID` and `CLIENT_SECRET` after registering an OAuth app (step 5 below).
-
 ### 4. Run database migrations
 
 ```bash
@@ -118,7 +101,7 @@ cd backend
 alembic upgrade head
 ```
 
-### 5. Start all three services
+### 5. Start both services
 
 Run each in a separate terminal:
 
@@ -129,10 +112,6 @@ python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # Terminal 2 — Frontend (port 5173)
 cd frontend
-npm run dev
-
-# Terminal 3 — Demo App (port 3000)
-cd demo-app
 npm run dev
 ```
 
@@ -147,12 +126,12 @@ curl -X POST http://localhost:8000/api/apps/ \
     "name": "My App",
     "description": "My test application",
     "scopes": ["openid", "profile", "email"],
-    "redirect_uris": ["http://localhost:3000/callback"],
+    "redirect_uris": ["https://yourapp.com/callback"],
     "icon_url": "https://ui-avatars.com/api/?name=MA&background=3b82f6&color=fff&size=128"
   }'
 ```
 
-The response includes `client_id` and `client_secret`. Put these in your `demo-app/.env` and restart the demo app.
+The response includes `client_id` and `client_secret`. **Save the secret** — it's only shown once.
 
 ---
 
@@ -353,13 +332,12 @@ alembic current
 
 ### Service Architecture
 
-The project runs on Railway as **3 services + 1 PostgreSQL database** in the `cus-auth` project.
+The project runs on Railway as **2 services + 1 PostgreSQL database** in the `cus-auth` project.
 
 | Service | Root Directory | Start Command |
 |---------|---------------|---------------|
 | backend | `backend` | `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | frontend | `frontend` | `npx serve dist -s -l $PORT` |
-| demo-app | `demo-app` | `npx serve dist -s -l $PORT` |
 
 ### Deploying
 
@@ -369,7 +347,6 @@ The project runs on Railway as **3 services + 1 PostgreSQL database** in the `cu
 # Deploy a single service
 railway up --service backend --detach
 railway up --service frontend --detach
-railway up --service demo-app --detach
 ```
 
 Each service has a `railway.toml` in its directory that configures the build and start commands. Railway uses the `rootDirectory` setting to scope the build to the correct subdirectory.
@@ -399,17 +376,6 @@ Each service has a `railway.toml` in its directory that configures the build and
 | `VITE_PRIVY_APP_ID` | Privy app ID |
 | `NIXPACKS_NODE_VERSION` | Set to `20` (required for Vite 7 + Privy SDK) |
 
-**Demo App** (`--service demo-app`):
-
-| Variable | Description |
-|----------|-------------|
-| `VITE_OAUTH_SERVER` | Backend URL |
-| `VITE_CLIENT_ID` | OAuth app client_id |
-| `VITE_CLIENT_SECRET` | OAuth app client_secret |
-| `VITE_REDIRECT_URI` | Callback URL (demo-app URL + `/callback`) |
-| `VITE_SCOPES` | Space-separated scope list |
-| `NIXPACKS_NODE_VERSION` | Set to `20` |
-
 ### Managing Variables
 
 ```bash
@@ -433,7 +399,7 @@ curl -s -X POST "https://backboard.railway.com/graphql/v2" \
   }'
 ```
 
-Service IDs: `backend=74d82bf8`, `frontend=aeaf64c4`, `demo-app=362b8081`, `env=841b21b5`
+Service IDs: `backend=74d82bf8`, `frontend=aeaf64c4`, `env=841b21b5`
 
 ### Production RSA Keys
 
@@ -519,13 +485,6 @@ ns-auth/
 │   │   ├── pages/           # Dashboard, CreateApp, AppDetail, Login, Consent
 │   │   ├── components/      # shadcn-style UI components
 │   │   └── lib/             # API client, utilities
-│   ├── package.json
-│   └── railway.toml
-├── demo-app/
-│   ├── src/
-│   │   ├── config.ts        # OAuth client configuration
-│   │   ├── Home.tsx         # "Sign in with NS" button + PKCE
-│   │   └── Callback.tsx     # Token exchange + userinfo display
 │   ├── package.json
 │   └── railway.toml
 └── CLAUDE.md                # Detailed technical reference
