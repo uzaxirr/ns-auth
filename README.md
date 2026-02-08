@@ -67,12 +67,28 @@ npm install
 **`backend/.env`**
 
 ```env
+# Database — two connection strings required (async for the app, sync for Alembic migrations)
+# Defaults to local PostgreSQL if not set. Change these for Supabase, Neon, AWS RDS, etc.
+OAUTH_DATABASE_URL=postgresql+asyncpg://user:password@host:5432/dbname
+OAUTH_DATABASE_URL_SYNC=postgresql://user:password@host:5432/dbname
+
+# Privy authentication
 OAUTH_PRIVY_APP_ID=<your privy app id>
 OAUTH_PRIVY_APP_SECRET=<your privy app secret>
+
+# Session & security
 OAUTH_SESSION_SECRET=<64+ character random string>
+
+# CORS & frontend
 OAUTH_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
 OAUTH_FRONTEND_URL=http://localhost:5173
 ```
+
+> **Database connection strings:** The backend needs two DB URLs — one with `asyncpg` driver (for the app) and one with `psycopg2` (for Alembic migrations). If you're using a hosted DB like Supabase, Neon, or AWS RDS, take the connection string they provide and set both:
+> - `OAUTH_DATABASE_URL` — prefix with `postgresql+asyncpg://`
+> - `OAUTH_DATABASE_URL_SYNC` — prefix with `postgresql://`
+>
+> For local development, these default to `postgresql+asyncpg://$(whoami)@localhost:5432/oauth_provider` and you don't need to set them.
 
 All backend env vars use the `OAUTH_` prefix. See `backend/app/config.py` for the full list with defaults.
 
@@ -364,8 +380,8 @@ Each service has a `railway.toml` in its directory that configures the build and
 
 | Variable | Description |
 |----------|-------------|
-| `OAUTH_DATABASE_URL` | Async PostgreSQL URL (`postgresql+asyncpg://...`) |
-| `OAUTH_DATABASE_URL_SYNC` | Sync PostgreSQL URL for Alembic (`postgresql://...`) |
+| `OAUTH_DATABASE_URL` | Async PostgreSQL URL (`postgresql+asyncpg://user:pass@host:5432/db`). Use your Supabase/Neon/RDS connection string with `postgresql+asyncpg://` prefix |
+| `OAUTH_DATABASE_URL_SYNC` | Sync PostgreSQL URL for Alembic migrations (`postgresql://user:pass@host:5432/db`). Same credentials, just `postgresql://` prefix |
 | `OAUTH_ISSUER` | Backend public URL |
 | `OAUTH_RSA_PRIVATE_KEY` | Base64-encoded RSA private key PEM |
 | `OAUTH_RSA_PUBLIC_KEY` | Base64-encoded RSA public key PEM |
