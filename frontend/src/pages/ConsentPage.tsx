@@ -11,6 +11,7 @@ import {
   Wallet,
   RefreshCw,
   Loader2,
+  AppWindow,
 } from "lucide-react"
 
 interface AppInfo {
@@ -166,8 +167,19 @@ export function ConsentPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2">
-            {/* Left column — app name + user chip */}
+            {/* Left column — app icon + app name + user chip */}
             <div className="flex flex-col justify-center p-8 md:border-r border-border">
+              {appInfo?.app_icon_url ? (
+                <img
+                  src={appInfo.app_icon_url}
+                  alt={appName}
+                  className="w-12 h-12 rounded-xl mb-5"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center mb-5">
+                  <AppWindow className="w-6 h-6 text-muted-foreground" />
+                </div>
+              )}
               <h1 className="text-xl text-muted-foreground leading-snug">
                 Sign in to
               </h1>
