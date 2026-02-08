@@ -55,6 +55,9 @@ export function Home() {
         <button
           onClick={handleSignIn}
           style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 10,
             padding: "14px 32px",
             fontSize: 15,
             fontWeight: 600,
@@ -68,6 +71,7 @@ export function Home() {
           onMouseOver={(e) => (e.currentTarget.style.opacity = "0.9")}
           onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
         >
+          <img src="/ns-flag.svg" alt="" style={{ width: 20, height: 20 }} />
           Sign in with Network School
         </button>
       </div>
