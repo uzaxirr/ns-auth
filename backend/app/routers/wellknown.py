@@ -6,12 +6,20 @@ from app.security.keys import get_jwks
 router = APIRouter(tags=["well-known"])
 
 
-@router.get("/.well-known/jwks.json")
+@router.get(
+    "/.well-known/jwks.json",
+    summary="JSON Web Key Set",
+    description="Returns the public RSA key set used to verify RS256-signed access tokens and ID tokens.",
+)
 async def jwks():
     return get_jwks()
 
 
-@router.get("/.well-known/oauth-authorization-server")
+@router.get(
+    "/.well-known/oauth-authorization-server",
+    summary="OAuth 2.0 Authorization Server Metadata",
+    description="RFC 8414 metadata document. Returns issuer, endpoints, supported grant types, response types, code challenge methods, scopes, and authentication methods.",
+)
 async def oauth_metadata():
     return {
         "issuer": settings.issuer,
@@ -32,7 +40,11 @@ async def oauth_metadata():
     }
 
 
-@router.get("/.well-known/openid-configuration")
+@router.get(
+    "/.well-known/openid-configuration",
+    summary="OpenID Connect Discovery",
+    description="OIDC discovery document. Returns issuer, endpoints, supported algorithms (`RS256`), scopes, grant types, and authentication methods. Clients can auto-configure from this URL.",
+)
 async def openid_configuration():
     return {
         "issuer": settings.issuer,

@@ -25,7 +25,17 @@ ALLOWED_TYPES = {
 MAX_SIZE = 2 * 1024 * 1024  # 2 MB
 
 
-@router.post("/{app_id}/icon", response_model=OAuthAppResponse)
+@router.post(
+    "/{app_id}/icon",
+    response_model=OAuthAppResponse,
+    summary="Upload app icon",
+    description="Upload an icon for an OAuth app. Accepts PNG, JPEG, GIF, WebP, and SVG. Max file size: 2 MB. Replaces the existing icon if one exists.",
+    responses={
+        200: {"description": "Updated app with `icon_url`."},
+        400: {"description": "File type not allowed or file too large."},
+        404: {"description": "App not found."},
+    },
+)
 async def upload_icon(
     app_id: uuid.UUID,
     file: UploadFile,
@@ -61,7 +71,16 @@ async def upload_icon(
     return app
 
 
-@router.delete("/{app_id}/icon", response_model=OAuthAppResponse)
+@router.delete(
+    "/{app_id}/icon",
+    response_model=OAuthAppResponse,
+    summary="Delete app icon",
+    description="Removes the icon from an OAuth app and deletes the file from storage.",
+    responses={
+        200: {"description": "Updated app with `icon_url: null`."},
+        404: {"description": "App not found."},
+    },
+)
 async def delete_icon(
     app_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),

@@ -1,0 +1,1535 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Network School OAuth Provider",
+    "description": "OAuth 2.0 / OpenID Connect identity provider for Network School.\n\nLets third-party apps request NS user data via standard OAuth scopes \u2014 the same pattern as \"Sign in with Google.\"\n\n## Flows\n\n- **Authorization Code + PKCE** \u2014 user-facing \"Sign in with Network School\" flow\n- **Client Credentials** \u2014 machine-to-machine, no user context\n\n## Scopes\n\n| Scope | Claims |\n|-------|--------|\n| `openid` | `sub` |\n| `email` | `email`, `email_verified` |\n| `profile` | `name`, `picture`, `bio` |\n| `cohort` | `cohort` |\n| `socials` | `socials` (JSON: twitter, github, linkedin, website) |\n| `wallet` | `wallet_address` |\n| `activity` | `posts_count`, `streak_days`, `last_active` |\n| `offline_access` | refresh tokens |\n\n## Authentication\n\n- **User auth**: Privy (ES256 JWT verified via JWKS)\n- **Sessions**: HS256 JWT in httponly cookie (`ns_session`)\n- **Access tokens**: RS256 JWT (auto-generated RSA keys)\n- **Client auth**: `client_secret` verified via bcrypt\n",
+    "license": {
+      "name": "Private",
+      "url": "https://ns.com/"
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/apps/": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "List all OAuth apps",
+        "description": "Returns all registered OAuth applications, sorted by creation date (newest first). Does not include client secrets.",
+        "operationId": "list_apps_api_apps__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OAuthAppResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Apps Api Apps  Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Register a new OAuth app",
+        "description": "Creates a new OAuth client application. Returns the `client_id` and `client_secret` \u2014 the secret is only returned once at creation time (stored as a bcrypt hash). Scopes are validated against the set of available scopes.",
+        "operationId": "create_app_api_apps__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthAppCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "App created. **`client_secret` is only returned in this response.**",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAppCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid scopes."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apps/{app_id}": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Get an OAuth app",
+        "description": "Returns a single OAuth app by its UUID. Does not include the client secret.",
+        "operationId": "get_app_api_apps__app_id__get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAppResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "App not found."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Update an OAuth app",
+        "description": "Partially updates an OAuth app. Only provided fields are changed. Scopes are re-validated if provided.",
+        "operationId": "update_app_api_apps__app_id__patch",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthAppUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated app.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAppResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid scopes."
+          },
+          "404": {
+            "description": "App not found."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Delete an OAuth app",
+        "description": "Permanently deletes an OAuth app and its credentials. This cannot be undone.",
+        "operationId": "delete_app_api_apps__app_id__delete",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "App deleted."
+          },
+          "404": {
+            "description": "App not found."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login/privy": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login with Privy token",
+        "description": "Exchanges a Privy access token (ES256 JWT) for a Network School session. Verifies the token against Privy's JWKS, fetches the user's email from the Privy Server API, creates or retrieves the user (JIT provisioning), and sets an `ns_session` httponly cookie (HS256 JWT).",
+        "operationId": "login_with_privy_auth_login_privy_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrivyLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "User object. Sets `ns_session` httponly cookie.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Privy token verification failed."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Get current user",
+        "description": "Returns the authenticated user's profile from the `ns_session` cookie. Used by the consent page to display who is granting access.",
+        "operationId": "get_current_user_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "User profile.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "`not_authenticated` (no/invalid session) or `user_not_found`."
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout",
+        "description": "Clears the `ns_session` cookie, ending the user's session.",
+        "operationId": "logout_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "`{\"ok\": true}`. Session cookie cleared.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/dev/login-as": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "[DEV] Login as any user by email",
+        "description": "**Development/testing only.** Creates a session for a user by email without Privy authentication. Remove before production.",
+        "operationId": "dev_login_as_auth_dev_login_as_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "User object. Sets `ns_session` cookie.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "`email required`."
+          },
+          "404": {
+            "description": "`user not found`."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/authorize": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Start authorization code flow",
+        "description": "Validates the client request and redirects the user to the login page (if unauthenticated) or consent page (if authenticated). The frontend renders login/consent UI, then posts back to `/oauth/authorize/consent`.",
+        "operationId": "authorize_oauth_authorize_get",
+        "parameters": [
+          {
+            "name": "response_type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Response Type"
+            }
+          },
+          {
+            "name": "client_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Client Id"
+            }
+          },
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Redirect Uri"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "openid",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "name": "code_challenge",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code Challenge"
+            }
+          },
+          {
+            "name": "code_challenge_method",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code Challenge Method"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "302": {
+            "description": "Redirect to frontend `/login` or `/consent` with all authorize params."
+          },
+          "400": {
+            "description": "Invalid `response_type`, unknown `client_id`, or unregistered `redirect_uri`."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/authorize/info": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Get app info for consent screen",
+        "description": "Returns the app name, icon, description, privacy policy URL, and requested scope details. Used by the consent page to render what permissions the user is granting.",
+        "operationId": "authorize_info_oauth_authorize_info_get",
+        "parameters": [
+          {
+            "name": "client_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Client Id"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "openid",
+              "title": "Scope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App info with scope details.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown `client_id`."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/authorize/consent": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Submit consent decision",
+        "description": "Called by the consent page after the user clicks Allow or Deny. Returns JSON `{\"redirect_to\": url}` (not a 302) because cross-origin fetch makes the Location header inaccessible. If approved, generates an authorization code and appends it to the redirect URI. If denied, appends `error=access_denied`.",
+        "operationId": "authorize_consent_oauth_authorize_consent_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_authorize_consent_oauth_authorize_consent_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "JSON with `redirect_to` URL containing either `code` + `state` (approved) or `error=access_denied` (denied).",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown `client_id` or unregistered `redirect_uri`."
+          },
+          "401": {
+            "description": "User not authenticated (no valid session cookie)."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/token": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Exchange credentials for tokens",
+        "description": "Token endpoint supporting two grant types:\n\n- **`client_credentials`** \u2014 Machine-to-machine. Requires `client_id` + `client_secret`. Returns an access token with no user context.\n- **`authorization_code`** \u2014 User-facing. Exchanges an authorization code (from `/oauth/authorize/consent`) for an access token. Supports PKCE (`code_verifier`). If `openid` scope was granted, also returns an `id_token`.\n\nClient authentication: provide `client_secret` for confidential clients, or omit for public clients (PKCE-only).",
+        "operationId": "token_oauth_token_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_token_oauth_token_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Token response with `access_token`, `token_type`, `expires_in`, `scope`, and optionally `id_token`.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Missing required fields, invalid/expired authorization code, PKCE mismatch, or unsupported grant type."
+          },
+          "401": {
+            "description": "Invalid client credentials."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/userinfo": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Get user claims (OIDC UserInfo)",
+        "description": "Returns user claims based on the scopes granted to the access token.\n\nRequires a valid Bearer token in the `Authorization` header. The token must have been issued via the `authorization_code` grant (tokens from `client_credentials` have no user context and will be rejected).\n\n**Claims by scope:** `openid` \u2192 sub | `email` \u2192 email, email_verified | `profile` \u2192 name, picture, bio | `cohort` \u2192 cohort | `socials` \u2192 socials | `wallet` \u2192 wallet_address | `activity` \u2192 posts_count, streak_days, last_active.",
+        "operationId": "userinfo_oauth_userinfo_get",
+        "responses": {
+          "200": {
+            "description": "User claims object (scope-gated).",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing Bearer token, invalid/expired token, token has no user context, or user not found."
+          }
+        }
+      }
+    },
+    "/oauth/token/introspect": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Introspect a token",
+        "description": "Check whether an access token is active. Returns token metadata including `scope`, `client_id`, `user_id`, `exp`, `iat`, `jti`, and `iss`. Returns `{\"active\": false}` for invalid, expired, or revoked tokens.",
+        "operationId": "introspect_oauth_token_introspect_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_introspect_oauth_token_introspect_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Introspection result with `active` boolean and token metadata.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/token/revoke": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Revoke a token",
+        "description": "Revokes an access token so it can no longer be used. Always returns 200 regardless of whether the token existed.",
+        "operationId": "revoke_oauth_token_revoke_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_revoke_oauth_token_revoke_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Empty JSON `{}`. Token is revoked (or was already invalid).",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scopes/": {
+      "get": {
+        "tags": [
+          "scopes"
+        ],
+        "summary": "List available scopes",
+        "description": "Returns all available OAuth scopes with their descriptions and the claims each scope grants access to.",
+        "operationId": "list_scopes_api_scopes__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apps/{app_id}/icon": {
+      "post": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Upload app icon",
+        "description": "Upload an icon for an OAuth app. Accepts PNG, JPEG, GIF, WebP, and SVG. Max file size: 2 MB. Replaces the existing icon if one exists.",
+        "operationId": "upload_icon_api_apps__app_id__icon_post",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_icon_api_apps__app_id__icon_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated app with `icon_url`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAppResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "File type not allowed or file too large."
+          },
+          "404": {
+            "description": "App not found."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Delete app icon",
+        "description": "Removes the icon from an OAuth app and deletes the file from storage.",
+        "operationId": "delete_icon_api_apps__app_id__icon_delete",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated app with `icon_url: null`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAppResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "App not found."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/jwks.json": {
+      "get": {
+        "tags": [
+          "well-known"
+        ],
+        "summary": "JSON Web Key Set",
+        "description": "Returns the public RSA key set used to verify RS256-signed access tokens and ID tokens.",
+        "operationId": "jwks__well_known_jwks_json_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-authorization-server": {
+      "get": {
+        "tags": [
+          "well-known"
+        ],
+        "summary": "OAuth 2.0 Authorization Server Metadata",
+        "description": "RFC 8414 metadata document. Returns issuer, endpoints, supported grant types, response types, code challenge methods, scopes, and authentication methods.",
+        "operationId": "oauth_metadata__well_known_oauth_authorization_server_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/openid-configuration": {
+      "get": {
+        "tags": [
+          "well-known"
+        ],
+        "summary": "OpenID Connect Discovery",
+        "description": "OIDC discovery document. Returns issuer, endpoints, supported algorithms (`RS256`), scopes, grant types, and authentication methods. Clients can auto-configure from this URL.",
+        "operationId": "openid_configuration__well_known_openid_configuration_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health check",
+        "description": "Returns `{\"status\": \"ok\"}` when the server is running.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_authorize_consent_oauth_authorize_consent_post": {
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          },
+          "redirect_uri": {
+            "type": "string",
+            "title": "Redirect Uri"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "default": "openid"
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "default": ""
+          },
+          "code_challenge": {
+            "type": "string",
+            "title": "Code Challenge",
+            "default": ""
+          },
+          "code_challenge_method": {
+            "type": "string",
+            "title": "Code Challenge Method",
+            "default": ""
+          },
+          "approved": {
+            "type": "boolean",
+            "title": "Approved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "client_id",
+          "redirect_uri",
+          "approved"
+        ],
+        "title": "Body_authorize_consent_oauth_authorize_consent_post"
+      },
+      "Body_introspect_oauth_token_introspect_post": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "Body_introspect_oauth_token_introspect_post"
+      },
+      "Body_revoke_oauth_token_revoke_post": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "Body_revoke_oauth_token_revoke_post"
+      },
+      "Body_token_oauth_token_post": {
+        "properties": {
+          "grant_type": {
+            "type": "string",
+            "title": "Grant Type"
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client Secret"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "redirect_uri": {
+            "type": "string",
+            "title": "Redirect Uri"
+          },
+          "code_verifier": {
+            "type": "string",
+            "title": "Code Verifier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "grant_type"
+        ],
+        "title": "Body_token_oauth_token_post"
+      },
+      "Body_upload_icon_api_apps__app_id__icon_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_icon_api_apps__app_id__icon_post"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "OAuthAppCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name of the application.",
+            "examples": [
+              "My Cool App"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Short description of the application.",
+            "examples": [
+              "A demo OAuth client for testing."
+            ]
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes",
+            "description": "Requested OAuth scopes. Validated against available scopes: openid, profile, email, cohort, activity, socials, wallet, offline_access.",
+            "default": [],
+            "examples": [
+              [
+                "openid",
+                "email",
+                "profile"
+              ]
+            ]
+          },
+          "redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Redirect Uris",
+            "description": "Allowed OAuth callback URLs.",
+            "default": [],
+            "examples": [
+              [
+                "https://myapp.example.com/callback"
+              ]
+            ]
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Url",
+            "description": "URL to the app icon (set via icon upload endpoint)."
+          },
+          "privacy_policy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Privacy Policy Url",
+            "description": "URL to the app's privacy policy.",
+            "examples": [
+              "https://myapp.example.com/privacy"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "OAuthAppCreate",
+        "description": "Request body for creating a new OAuth application."
+      },
+      "OAuthAppCreated": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "Unique app identifier."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "App description."
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id",
+            "description": "OAuth client ID (32-char hex)."
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes",
+            "description": "Registered scopes."
+          },
+          "redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Redirect Uris",
+            "description": "Registered callback URLs."
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Url",
+            "description": "App icon URL path."
+          },
+          "privacy_policy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Privacy Policy Url",
+            "description": "Privacy policy URL."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "UTC creation timestamp."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "UTC last-updated timestamp."
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client Secret",
+            "description": "Client secret (returned ONCE at creation \u2014 stored as bcrypt hash, never retrievable again)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "client_id",
+          "scopes",
+          "redirect_uris",
+          "created_at",
+          "updated_at",
+          "client_secret"
+        ],
+        "title": "OAuthAppCreated",
+        "description": "OAuth application with client secret. The secret is only returned once at creation time."
+      },
+      "OAuthAppResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "Unique app identifier."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "App description."
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id",
+            "description": "OAuth client ID (32-char hex)."
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes",
+            "description": "Registered scopes."
+          },
+          "redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Redirect Uris",
+            "description": "Registered callback URLs."
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Url",
+            "description": "App icon URL path."
+          },
+          "privacy_policy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Privacy Policy Url",
+            "description": "Privacy policy URL."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "UTC creation timestamp."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "UTC last-updated timestamp."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "client_id",
+          "scopes",
+          "redirect_uris",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OAuthAppResponse",
+        "description": "OAuth application details (without client secret)."
+      },
+      "OAuthAppUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "New display name."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "New description."
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scopes",
+            "description": "New scopes (validated)."
+          },
+          "redirect_uris": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uris",
+            "description": "New redirect URIs."
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Url",
+            "description": "New icon URL."
+          },
+          "privacy_policy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Privacy Policy Url",
+            "description": "New privacy policy URL."
+          }
+        },
+        "type": "object",
+        "title": "OAuthAppUpdate",
+        "description": "Request body for partially updating an OAuth application. Only provided fields are changed."
+      },
+      "PrivyLoginRequest": {
+        "properties": {
+          "privy_token": {
+            "type": "string",
+            "title": "Privy Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "privy_token"
+        ],
+        "title": "PrivyLoginRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "oauth",
+      "description": "OAuth 2.0 / OpenID Connect endpoints \u2014 authorization, token exchange, userinfo, introspection, and revocation."
+    },
+    {
+      "name": "auth",
+      "description": "User authentication and session management via Privy."
+    },
+    {
+      "name": "apps",
+      "description": "Register, list, update, and delete OAuth client applications."
+    },
+    {
+      "name": "uploads",
+      "description": "Upload and manage OAuth app icons."
+    },
+    {
+      "name": "scopes",
+      "description": "List available OAuth scopes and their claims."
+    },
+    {
+      "name": "well-known",
+      "description": "OIDC discovery and JWKS endpoints (RFC 8414 / RFC 5849)."
+    }
+  ]
+}

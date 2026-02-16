@@ -23,7 +23,15 @@ def oauth_error(error: str, description: str, status_code: int = 400) -> JSONRes
     )
 
 
-@router.get("/authorize")
+@router.get(
+    "/authorize",
+    summary="Start authorization code flow",
+    description="Validates the client request and redirects the user to the login page (if unauthenticated) or consent page (if authenticated). The frontend renders login/consent UI, then posts back to `/oauth/authorize/consent`.",
+    responses={
+        302: {"description": "Redirect to frontend `/login` or `/consent` with all authorize params."},
+        400: {"description": "Invalid `response_type`, unknown `client_id`, or unregistered `redirect_uri`."},
+    },
+)
 async def authorize(
     request: Request,
     response_type: str = Query(...),
@@ -68,7 +76,15 @@ async def authorize(
         )
 
 
-@router.get("/authorize/info")
+@router.get(
+    "/authorize/info",
+    summary="Get app info for consent screen",
+    description="Returns the app name, icon, description, privacy policy URL, and requested scope details. Used by the consent page to render what permissions the user is granting.",
+    responses={
+        200: {"description": "App info with scope details."},
+        400: {"description": "Unknown `client_id`."},
+    },
+)
 async def authorize_info(
     client_id: str = Query(...),
     scope: str = Query("openid"),
@@ -91,7 +107,16 @@ async def authorize_info(
     }
 
 
-@router.post("/authorize/consent")
+@router.post(
+    "/authorize/consent",
+    summary="Submit consent decision",
+    description="Called by the consent page after the user clicks Allow or Deny. Returns JSON `{\"redirect_to\": url}` (not a 302) because cross-origin fetch makes the Location header inaccessible. If approved, generates an authorization code and appends it to the redirect URI. If denied, appends `error=access_denied`.",
+    responses={
+        200: {"description": "JSON with `redirect_to` URL containing either `code` + `state` (approved) or `error=access_denied` (denied)."},
+        400: {"description": "Unknown `client_id` or unregistered `redirect_uri`."},
+        401: {"description": "User not authenticated (no valid session cookie)."},
+    },
+)
 async def authorize_consent(
     request: Request,
     client_id: str = Form(...),
@@ -135,7 +160,22 @@ async def authorize_consent(
     return JSONResponse(content={"redirect_to": f"{redirect_uri}?{urlencode(params)}"})
 
 
-@router.post("/token")
+@router.post(
+    "/token",
+    summary="Exchange credentials for tokens",
+    description="""Token endpoint supporting two grant types:
+
+- **`client_credentials`** — Machine-to-machine. Requires `client_id` + `client_secret`. Returns an access token with no user context.
+- **`authorization_code`** — User-facing. Exchanges an authorization code (from `/oauth/authorize/consent`) for an access token. Supports PKCE (`code_verifier`). If `openid` scope was granted, also returns an `id_token`.
+
+Client authentication: provide `client_secret` for confidential clients, or omit for public clients (PKCE-only).
+""",
+    responses={
+        200: {"description": "Token response with `access_token`, `token_type`, `expires_in`, `scope`, and optionally `id_token`."},
+        400: {"description": "Missing required fields, invalid/expired authorization code, PKCE mismatch, or unsupported grant type."},
+        401: {"description": "Invalid client credentials."},
+    },
+)
 async def token(
     grant_type: str = Form(...),
     client_id: str = Form(None),
@@ -214,7 +254,20 @@ async def token(
         )
 
 
-@router.get("/userinfo")
+@router.get(
+    "/userinfo",
+    summary="Get user claims (OIDC UserInfo)",
+    description="""Returns user claims based on the scopes granted to the access token.
+
+Requires a valid Bearer token in the `Authorization` header. The token must have been issued via the `authorization_code` grant (tokens from `client_credentials` have no user context and will be rejected).
+
+**Claims by scope:** `openid` → sub | `email` → email, email_verified | `profile` → name, picture, bio | `cohort` → cohort | `socials` → socials | `wallet` → wallet_address | `activity` → posts_count, streak_days, last_active.
+""",
+    responses={
+        200: {"description": "User claims object (scope-gated)."},
+        401: {"description": "Missing Bearer token, invalid/expired token, token has no user context, or user not found."},
+    },
+)
 async def userinfo(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -265,7 +318,14 @@ async def userinfo(
     return claims
 
 
-@router.post("/token/introspect")
+@router.post(
+    "/token/introspect",
+    summary="Introspect a token",
+    description="Check whether an access token is active. Returns token metadata including `scope`, `client_id`, `user_id`, `exp`, `iat`, `jti`, and `iss`. Returns `{\"active\": false}` for invalid, expired, or revoked tokens.",
+    responses={
+        200: {"description": "Introspection result with `active` boolean and token metadata."},
+    },
+)
 async def introspect(
     token: str = Form(...),
     client_id: str = Form(None),
@@ -276,7 +336,14 @@ async def introspect(
     return result
 
 
-@router.post("/token/revoke")
+@router.post(
+    "/token/revoke",
+    summary="Revoke a token",
+    description="Revokes an access token so it can no longer be used. Always returns 200 regardless of whether the token existed.",
+    responses={
+        200: {"description": "Empty JSON `{}`. Token is revoked (or was already invalid)."},
+    },
+)
 async def revoke(
     token: str = Form(...),
     client_id: str = Form(None),

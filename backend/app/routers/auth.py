@@ -48,7 +48,15 @@ class UserResponse(BaseModel):
         )
 
 
-@router.post("/login/privy")
+@router.post(
+    "/login/privy",
+    summary="Login with Privy token",
+    description="Exchanges a Privy access token (ES256 JWT) for a Network School session. Verifies the token against Privy's JWKS, fetches the user's email from the Privy Server API, creates or retrieves the user (JIT provisioning), and sets an `ns_session` httponly cookie (HS256 JWT).",
+    responses={
+        200: {"description": "User object. Sets `ns_session` httponly cookie."},
+        401: {"description": "Privy token verification failed."},
+    },
+)
 async def login_with_privy(
     body: PrivyLoginRequest,
     db: AsyncSession = Depends(get_db),
@@ -84,7 +92,15 @@ async def login_with_privy(
     return response
 
 
-@router.get("/me")
+@router.get(
+    "/me",
+    summary="Get current user",
+    description="Returns the authenticated user's profile from the `ns_session` cookie. Used by the consent page to display who is granting access.",
+    responses={
+        200: {"description": "User profile."},
+        401: {"description": "`not_authenticated` (no/invalid session) or `user_not_found`."},
+    },
+)
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -100,7 +116,12 @@ async def get_current_user(
     return UserResponse.from_user(user)
 
 
-@router.post("/logout")
+@router.post(
+    "/logout",
+    summary="Logout",
+    description="Clears the `ns_session` cookie, ending the user's session.",
+    responses={200: {"description": "`{\"ok\": true}`. Session cookie cleared."}},
+)
 async def logout():
     response = JSONResponse(content={"ok": True})
     clear_session_cookie(response)
@@ -108,7 +129,16 @@ async def logout():
 
 
 # DEV ONLY — remove before production
-@router.post("/dev/login-as")
+@router.post(
+    "/dev/login-as",
+    summary="[DEV] Login as any user by email",
+    description="**Development/testing only.** Creates a session for a user by email without Privy authentication. Remove before production.",
+    responses={
+        200: {"description": "User object. Sets `ns_session` cookie."},
+        400: {"description": "`email required`."},
+        404: {"description": "`user not found`."},
+    },
+)
 async def dev_login_as(
     body: dict,
     db: AsyncSession = Depends(get_db),
