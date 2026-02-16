@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sequence: OAuth Consent &amp; Token Exchange</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #e5e5e5; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem; }
+    h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; color: #fff; }
+    p.subtitle { font-size: 0.875rem; color: #888; margin-bottom: 2rem; }
+    .diagram-container { width: 100%; max-width: 1400px; overflow-x: auto; background: #111; border: 1px solid #222; border-radius: 8px; padding: 2rem; }
+    .mermaid { display: flex; justify-content: center; }
+    .mermaid svg { max-width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  <h1>OAuth Consent, Token Exchange &amp; UserInfo</h1>
+  <p class="subtitle">ConsentPage.tsx &rarr; /oauth/authorize/consent &rarr; Callback.tsx &rarr; /oauth/token &rarr; /oauth/userinfo</p>
+  <div class="diagram-container">
+    <pre class="mermaid">
+sequenceDiagram
+    actor User as End User
+    participant Consent as Frontend (ConsentPage.tsx)
+    participant OAuth as Backend (routers/oauth.py)
+    participant AuthR as Backend (routers/auth.py)
+    participant SessionSvc as SessionService
+    participant AuthzSvc as AuthzService (authz_service.py)
+    participant TokenSvc as TokenService (token_service.py)
+    participant Client as Demo App (Callback.tsx)
+    participant DB as PostgreSQL
+
+    Note over User,DB: PHASE 3 — Consent screen
+
+    User->>Consent: Browser loads /consent?{params}
+
+    par Fetch app info and user info in parallel
+        Consent->>OAuth: GET /oauth/authorize/info<br/>?client_id={id}&scope={scopes}
+        OAuth->>DB: Lookup app by client_id
+        OAuth-->>Consent: 200 {app_name, app_icon_url,<br/>app_description, privacy_policy_url,<br/>scopes: [{name, description, claims}]}
+    and
+        Consent->>AuthR: GET /auth/me<br/>credentials: "include" (sends ns_session cookie)
+        AuthR->>SessionSvc: get_session_user_id(request)
+        AuthR->>DB: Fetch user by id
+        AuthR-->>Consent: 200 {id, email, display_name, avatar_url}
+    end
+
+    Consent-->>User: Render consent screen:<br/>App name + icon, requested scopes,<br/>logged-in user info, Allow / Deny buttons
+
+    alt User clicks "Deny"
+        User->>Consent: Click Deny
+        Consent->>OAuth: POST /oauth/authorize/consent<br/>Content-Type: x-www-form-urlencoded<br/>credentials: "include"<br/>body: {client_id, redirect_uri, scope,<br/>state, code_challenge,<br/>code_challenge_method, approved:"false"}
+        OAuth-->>Consent: 200 {redirect_to:<br/>"{redirect_uri}?error=access_denied&state={s}"}
+        Consent->>Client: window.location.href = redirect_to
+        Client-->>User: Display error: "access_denied"
+    end
+
+    User->>Consent: Click "Allow"
+    Consent->>OAuth: POST /oauth/authorize/consent<br/>Content-Type: x-www-form-urlencoded<br/>credentials: "include"<br/>body: {client_id, redirect_uri, scope,<br/>state, code_challenge,<br/>code_challenge_method, approved:"true"}
+
+    OAuth->>SessionSvc: get_session_user_id(request)
+    alt Not authenticated (no valid session)
+        OAuth-->>Consent: 401 {error: "access_denied",<br/>error_description: "User not authenticated"}
+    end
+
+    OAuth->>DB: Re-validate client_id exists
+    alt client_id not found
+        OAuth-->>Consent: 400 {error: "invalid_client"}
+    end
+    OAuth->>DB: Re-validate redirect_uri registered
+    alt redirect_uri not registered
+        OAuth-->>Consent: 400 {error: "invalid_request"}
+    end
+
+    OAuth->>AuthzSvc: create_authorization_code(db,<br/>client_id, user_id, redirect_uri,<br/>scope, state, code_challenge,<br/>code_challenge_method)
+    AuthzSvc->>AuthzSvc: code = secrets.token_urlsafe(64)<br/>(~86 char random string)
+    AuthzSvc->>DB: INSERT INTO authorization_codes<br/>(code, client_id, user_id, redirect_uri,<br/>scope, state, code_challenge,<br/>code_challenge_method,<br/>expires_at=now+600s, used=false)
+
+    OAuth-->>Consent: 200 {redirect_to:<br/>"{redirect_uri}?code={code}&state={state}"}
+
+    Note over Consent: Returns JSON (not 302)<br/>because cross-origin fetch<br/>makes Location header inaccessible
+
+    Consent->>Client: window.location.href = redirect_to
+
+    Note over Client,DB: PHASE 4 — Token exchange
+
+    Client->>Client: Parse URL: ?code=CODE&state=S
+    Client->>Client: Retrieve saved state + code_verifier<br/>from sessionStorage
+
+    alt error parameter in URL
+        Client-->>User: Display error message
+    end
+    alt code parameter missing
+        Client-->>User: "No authorization code received"
+    end
+    alt state != saved oauth_state
+        Client-->>User: "State mismatch — possible CSRF attack"
+    end
+    alt code_verifier missing from sessionStorage
+        Client-->>User: "Missing PKCE code verifier"
+    end
+
+    Client->>OAuth: POST /oauth/token<br/>Content-Type: x-www-form-urlencoded<br/>body: grant_type=authorization_code<br/>&code={CODE}<br/>&redirect_uri={uri}<br/>&client_id={id}<br/>&client_secret={secret}<br/>&code_verifier={verifier}
+
+    alt Missing code, client_id, or redirect_uri
+        OAuth-->>Client: 400 {error: "invalid_request",<br/>error_description: "Missing required fields"}
+    end
+
+    Note over OAuth,TokenSvc: Client authentication
+
+    OAuth->>TokenSvc: authenticate_client(db, client_id, client_secret)
+    TokenSvc->>DB: Lookup app by client_id
+    TokenSvc->>TokenSvc: bcrypt.checkpw(secret, app.client_secret_hash)
+    alt Invalid client credentials
+        OAuth-->>Client: 401 {error: "invalid_client",<br/>error_description: "Invalid client credentials"}
+    end
+
+    alt client_secret not provided (public client)
+        OAuth->>DB: Lookup app by client_id only
+        alt client_id not found
+            OAuth-->>Client: 401 {error: "invalid_client",<br/>error_description: "Unknown client_id"}
+        end
+    end
+
+    Note over OAuth,AuthzSvc: Authorization code validation
+
+    OAuth->>AuthzSvc: exchange_authorization_code(db,<br/>code, client_id, redirect_uri, code_verifier)
+    AuthzSvc->>DB: SELECT FROM authorization_codes<br/>WHERE code = {code}
+
+    alt Code not found in DB
+        AuthzSvc-->>OAuth: None
+        OAuth-->>Client: 400 {error: "invalid_grant"}
+    end
+    alt record.used == true (replay attack)
+        AuthzSvc-->>OAuth: None
+        OAuth-->>Client: 400 {error: "invalid_grant"}
+    end
+    alt client_id mismatch
+        AuthzSvc-->>OAuth: None
+        OAuth-->>Client: 400 {error: "invalid_grant"}
+    end
+    alt redirect_uri mismatch
+        AuthzSvc-->>OAuth: None
+        OAuth-->>Client: 400 {error: "invalid_grant"}
+    end
+    alt Code expired (expires_at < now)
+        AuthzSvc-->>OAuth: None
+        OAuth-->>Client: 400 {error: "invalid_grant"}
+    end
+
+    Note over AuthzSvc: PKCE verification
+
+    alt code_challenge stored but code_verifier missing
+        AuthzSvc-->>OAuth: None
+        OAuth-->>Client: 400 {error: "invalid_grant"}
+    end
+    AuthzSvc->>AuthzSvc: S256: base64url(SHA256(code_verifier))<br/>Compare with stored code_challenge
+    alt PKCE challenge mismatch
+        AuthzSvc-->>OAuth: None
+        OAuth-->>Client: 400 {error: "invalid_grant"}
+    end
+
+    AuthzSvc->>DB: UPDATE authorization_codes<br/>SET used = true
+    AuthzSvc-->>OAuth: AuthorizationCode record
+
+    Note over OAuth,TokenSvc: Issue tokens
+
+    OAuth->>TokenSvc: issue_user_token(db, app, user_id, scopes)
+    TokenSvc->>TokenSvc: Filter scopes against app.scopes
+    TokenSvc->>TokenSvc: Sign RS256 JWT with RSA private key<br/>{iss, sub:user_id, aud:client_id,<br/>exp:now+3600, iat, jti:uuid,<br/>scope, client_id, user_id}
+    TokenSvc->>DB: INSERT INTO access_tokens<br/>(token_hash=SHA256(jwt), scopes,<br/>client_id, user_id, expires_at)
+
+    opt "openid" in granted scopes
+        OAuth->>TokenSvc: issue_id_token(user, client_id, scopes)
+        TokenSvc->>DB: Fetch user record
+        TokenSvc->>TokenSvc: Sign RS256 JWT with claims:<br/>{iss, sub:user_id, aud:client_id, exp, iat}<br/>+ email scope: email, email_verified<br/>+ profile scope: name, picture<br/>+ cohort scope: cohort<br/>+ wallet scope: wallet_address
+    end
+
+    OAuth-->>Client: 200 {<br/>access_token: "rs256_jwt",<br/>token_type: "Bearer",<br/>expires_in: 3600,<br/>scope: "granted scopes",<br/>id_token: "rs256_jwt" (if openid)<br/>}
+
+    Note over Client,DB: PHASE 5 — Fetch user info
+
+    Client->>OAuth: GET /oauth/userinfo<br/>Authorization: Bearer {access_token}
+
+    OAuth->>OAuth: Extract Bearer token from header
+    alt No Bearer token or wrong format
+        OAuth-->>Client: 401 {error: "invalid_request",<br/>error_description: "Bearer token required"}
+    end
+
+    OAuth->>TokenSvc: introspect_token(db, token)
+    TokenSvc->>TokenSvc: Compute SHA256(token)
+    TokenSvc->>DB: SELECT FROM access_tokens<br/>WHERE token_hash = {hash}
+    alt Token not found, revoked, or expired
+        OAuth-->>Client: 401 {error: "invalid_token",<br/>error_description: "Token is invalid or expired"}
+    end
+
+    OAuth->>OAuth: Extract user_id from token record
+    alt No user_id (machine token)
+        OAuth-->>Client: 401 {error: "invalid_token",<br/>error_description: "Token has no user context"}
+    end
+
+    OAuth->>DB: Fetch user by user_id
+    alt User not found
+        OAuth-->>Client: 401 {error: "invalid_token",<br/>error_description: "User not found"}
+    end
+
+    OAuth->>OAuth: Build claims by granted scopes:<br/>openid -> sub<br/>email -> email, email_verified<br/>profile -> name, picture, bio<br/>cohort -> cohort<br/>socials -> socials (JSON)<br/>wallet -> wallet_address<br/>activity -> posts_count, streak_days, last_active
+
+    OAuth-->>Client: 200 {sub, email, email_verified,<br/>name, picture, bio, cohort,<br/>socials, wallet_address, ...}
+
+    Client->>Client: Store tokens + userinfo in state
+    Client-->>User: Display profile card with user data
+    </pre>
+  </div>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      sequence: {
+        actorMargin: 40,
+        noteMargin: 10,
+        messageMargin: 30,
+        mirrorActors: false,
+        wrap: true,
+        width: 200,
+      },
+      themeVariables: {
+        primaryColor: '#1a1a2e',
+        primaryBorderColor: '#4a4a6a',
+        primaryTextColor: '#e5e5e5',
+        lineColor: '#6366f1',
+        secondaryColor: '#16213e',
+        tertiaryColor: '#0f3460',
+        noteBkgColor: '#1e1e3f',
+        noteTextColor: '#e5e5e5',
+        noteBorderColor: '#4a4a6a',
+        actorBkg: '#1a1a2e',
+        actorBorder: '#6366f1',
+        actorTextColor: '#e5e5e5',
+        signalColor: '#e5e5e5',
+      },
+    });
+  </script>
+</body>
+</html>

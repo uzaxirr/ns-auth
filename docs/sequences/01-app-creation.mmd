@@ -1,0 +1,61 @@
+sequenceDiagram
+    actor Dev as Developer
+    participant FE as Frontend (CreateApp.tsx)
+    participant API as Backend (routers/apps.py)
+    participant SVC as AppService (app_service.py)
+    participant HASH as Hashing (security/hashing.py)
+    participant VAL as Scope Validator (scopes.py)
+    participant DB as PostgreSQL (oauth_apps)
+
+    Dev->>FE: Fill form: name, description,<br/>redirect_uris, scopes, icon, privacy_policy_url
+
+    Note over FE: Client-side validation:<br/>name required, at least 1 redirect URI,<br/>icon max 2MB (png/jpg/gif/webp/svg)
+
+    FE->>FE: Filter empty redirect URIs from list
+
+    alt No redirect URIs after filtering
+        FE-->>Dev: Toast error: "At least one redirect URI is required"
+    end
+
+    FE->>API: POST /api/apps/<br/>body: {name, description, scopes[],<br/>redirect_uris[], privacy_policy_url}
+
+    API->>SVC: create_app(db, name, description,<br/>scopes, redirect_uris, ...)
+
+    SVC->>VAL: _validate_scopes(scopes)
+    VAL->>VAL: Compare against VALID_SCOPE_NAMES:<br/>{openid, profile, email, cohort,<br/>activity, socials, wallet, offline_access}
+
+    alt Invalid scopes detected
+        VAL-->>API: HTTPException(400)<br/>"Invalid scopes: x, y"
+        API-->>FE: 400 {detail: "Invalid scopes: x, y"}
+        FE-->>Dev: Toast error with detail message
+    end
+
+    SVC->>HASH: generate_client_id()
+    HASH-->>SVC: 32-char hex string<br/>(secrets.token_hex(16))
+
+    SVC->>HASH: generate_client_secret()
+    HASH-->>SVC: ~64-char base64url string<br/>(secrets.token_urlsafe(48))
+
+    SVC->>HASH: hash_client_secret(plaintext_secret)
+    HASH-->>SVC: bcrypt hash string
+
+    SVC->>DB: INSERT INTO oauth_apps<br/>(id=uuid4, name, client_id,<br/>client_secret_hash, scopes[],<br/>redirect_uris[], icon_url,<br/>privacy_policy_url,<br/>created_at=now, updated_at=now)
+    DB-->>SVC: Row committed + refreshed
+
+    SVC-->>API: Tuple(OAuthApp, plaintext_secret)
+
+    API-->>FE: 201 Created<br/>{id, name, client_id, client_secret,<br/>scopes, redirect_uris, icon_url,<br/>privacy_policy_url, created_at, updated_at}
+
+    Note over FE: client_secret is returned<br/>ONCE — stored as bcrypt hash<br/>in DB, never retrievable again
+
+    opt Icon file was selected by user
+        FE->>API: POST /api/apps/{id}/icon<br/>Content-Type: multipart/form-data<br/>(FormData with "file" field)
+        alt Upload succeeds
+            API-->>FE: 200 Updated app with icon_url
+        else Upload fails
+            API-->>FE: Error response
+            FE-->>Dev: Toast warning:<br/>"App created but icon upload failed"
+        end
+    end
+
+    FE-->>Dev: Success screen:<br/>- Warning: secret shown only once<br/>- client_id + client_secret display<br/>- "Copy both credentials" button<br/>- Scopes + redirect URIs summary<br/>- Link to app detail page

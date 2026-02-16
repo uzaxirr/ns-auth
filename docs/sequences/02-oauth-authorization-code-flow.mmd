@@ -1,0 +1,76 @@
+sequenceDiagram
+    actor User as End User
+    participant Client as Demo App (Home.tsx)
+    participant OAuth as Backend (routers/oauth.py)
+    participant SessionSvc as SessionService
+    participant Login as Frontend (LoginPage.tsx)
+    participant AuthR as Backend (routers/auth.py)
+    participant PrivySvc as PrivyService
+    participant Privy as Privy (auth.privy.io)
+    participant DB as PostgreSQL
+
+    Note over User,DB: PHASE 1 — Client initiates authorization request
+
+    User->>Client: Click "Sign in with Network School"
+    Client->>Client: generatePKCE() in pkce.ts:<br/>code_verifier = 32 random bytes<br/>code_challenge = base64url(SHA256(verifier))<br/>state = crypto.randomUUID()
+    Client->>Client: sessionStorage.setItem<br/>("pkce_code_verifier", verifier)<br/>("oauth_state", state)
+
+    Client->>OAuth: GET /oauth/authorize<br/>?response_type=code<br/>&client_id={VITE_CLIENT_ID}<br/>&redirect_uri={VITE_REDIRECT_URI}<br/>&scope={VITE_SCOPES}<br/>&state={state}<br/>&code_challenge={challenge}<br/>&code_challenge_method=S256
+
+    Note over OAuth: Validate request parameters
+
+    OAuth->>DB: get_app_by_client_id(client_id)
+
+    alt response_type != "code"
+        OAuth-->>Client: 400 {error: "unsupported_response_type",<br/>error_description: "Only 'code' is supported"}
+    end
+    alt client_id not found in DB
+        OAuth-->>Client: 400 {error: "invalid_client",<br/>error_description: "Unknown client_id"}
+    end
+    alt redirect_uri not in app.redirect_uris
+        OAuth-->>Client: 400 {error: "invalid_request",<br/>error_description: "redirect_uri not registered"}
+    end
+
+    Note over OAuth: Check user session
+
+    OAuth->>SessionSvc: get_session_user_id(request)
+    SessionSvc->>SessionSvc: Read "ns_session" cookie<br/>Verify HS256 JWT with session_secret
+
+    alt Session cookie valid — user authenticated
+        OAuth-->>User: 302 Redirect to<br/>{FRONTEND_URL}/consent?{all_params}
+    else No session or invalid cookie
+        OAuth-->>User: 302 Redirect to<br/>{FRONTEND_URL}/login?{all_params}
+    end
+
+    Note over User,DB: PHASE 2 — Login (only if unauthenticated)
+
+    User->>Login: Browser navigates to /login?{params}
+    Login->>Login: useEffect: auto-trigger Privy modal<br/>(useRef guard prevents StrictMode double-fire)
+    Login->>Privy: Privy SDK login()<br/>(email OTP / Google / Apple)
+    User->>Privy: Complete authentication
+    Privy-->>Login: authenticated = true
+    Login->>Privy: getAccessToken()
+    Privy-->>Login: ES256 JWT (privy_token)
+
+    Login->>AuthR: POST /auth/login/privy<br/>body: {privy_token: jwt}<br/>credentials: "include"
+
+    AuthR->>PrivySvc: verify_privy_token(jwt)
+    PrivySvc->>Privy: Fetch JWKS from auth.privy.io<br/>Verify ES256 signature
+    alt Invalid Privy JWT
+        PrivySvc-->>AuthR: Verification failed
+        AuthR-->>Login: 401 {error: "invalid_token",<br/>error_description: "Privy token verification failed"}
+    end
+    PrivySvc-->>AuthR: Decoded payload {sub: privy_did}
+
+    AuthR->>PrivySvc: get_privy_user(privy_did)
+    PrivySvc->>Privy: GET /api/v1/users/{did}<br/>(Basic auth: app_id:app_secret)
+    Privy-->>PrivySvc: {linked_accounts: [{type:"email", address:"user@x.com"}]}
+
+    AuthR->>DB: get_or_create_user_from_privy(privy_did, email)<br/>If new user: INSERT with empty profile fields<br/>If existing: return user record
+
+    AuthR->>SessionSvc: create_session_token(user.id)<br/>HS256 JWT {sub:user_id, iat, exp, type:"session"}
+    AuthR->>SessionSvc: set_session_cookie(response, token)<br/>Cookie: ns_session, httponly=true, path=/<br/>Production: secure=true, samesite=none<br/>Local: secure=false, samesite=lax
+
+    AuthR-->>Login: 200 {user: {id, email, display_name, ...}}<br/>+ Set-Cookie: ns_session=...
+
+    Login-->>User: window.location.href =<br/>/consent?{original_params}
