@@ -22,11 +22,16 @@ class Settings(BaseSettings):
 
     # Authorization code flow
     authorization_code_expiry_seconds: int = 600  # 10 minutes
+    refresh_token_expiry_seconds: int = 2592000  # 30 days
     frontend_url: str = "http://localhost:5173"
 
-    # Privy integration
-    privy_app_id: str = ""
-    privy_app_secret: str = ""
+    # Discord OAuth2 (v1)
+    discord_client_id: str = ""
+    discord_client_secret: str = ""
+    discord_bot_token: str = ""
+    discord_guild_id: str = ""
+    discord_redirect_uri: str = "http://localhost:8000/auth/discord/callback"
+    discord_cache_ttl_seconds: int = 300  # 5-minute TTL for live Discord data
 
     model_config = {"env_prefix": "OAUTH_", "env_file": ".env"}
 

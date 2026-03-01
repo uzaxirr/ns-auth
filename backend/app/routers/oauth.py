@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.services import app_service, authz_service, token_service, user_service
+from app.services import app_service, authz_service, claim_service, discord_service, scope_service, token_service, user_service
+from app.services.claim_resolver import resolve_claims
 from app.services.session_service import get_session_user_id
 
 router = APIRouter(prefix="/oauth", tags=["oauth"])
@@ -41,6 +42,7 @@ async def authorize(
     state: Optional[str] = Query(None),
     code_challenge: Optional[str] = Query(None),
     code_challenge_method: Optional[str] = Query(None),
+    prompt: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     if response_type != "code":
@@ -64,9 +66,24 @@ async def authorize(
     })
 
     user_id = get_session_user_id(request)
-    if user_id:
+    if user_id and prompt != "consent":
+        # v1: auto-approve — generate auth code and redirect immediately
+        # (skips consent screen since users already consented at Discord)
+        code = await authz_service.create_authorization_code(
+            db=db,
+            client_id=client_id,
+            user_id=user_id,
+            redirect_uri=redirect_uri,
+            scope=scope,
+            state=state or None,
+            code_challenge=code_challenge or None,
+            code_challenge_method=code_challenge_method or None,
+        )
+        params = {"code": code}
+        if state:
+            params["state"] = state
         return RedirectResponse(
-            url=f"{settings.frontend_url}/consent?{authorize_params}",
+            url=f"{redirect_uri}?{urlencode(params)}",
             status_code=302,
         )
     else:
@@ -95,8 +112,8 @@ async def authorize_info(
         return oauth_error("invalid_client", "Unknown client_id")
 
     requested_scopes = scope.split() if scope else []
-    from app.scopes import AVAILABLE_SCOPES
-    scope_details = [s for s in AVAILABLE_SCOPES if s["name"] in requested_scopes]
+    all_scopes = await scope_service.get_all_scopes(db)
+    scope_details = [s for s in all_scopes if s["name"] in requested_scopes]
 
     return {
         "app_name": app.name,
@@ -163,10 +180,11 @@ async def authorize_consent(
 @router.post(
     "/token",
     summary="Exchange credentials for tokens",
-    description="""Token endpoint supporting two grant types:
+    description="""Token endpoint supporting three grant types:
 
 - **`client_credentials`** — Machine-to-machine. Requires `client_id` + `client_secret`. Returns an access token with no user context.
-- **`authorization_code`** — User-facing. Exchanges an authorization code (from `/oauth/authorize/consent`) for an access token. Supports PKCE (`code_verifier`). If `openid` scope was granted, also returns an `id_token`.
+- **`authorization_code`** — User-facing. Exchanges an authorization code (from `/oauth/authorize/consent`) for an access token. Supports PKCE (`code_verifier`). If `openid` scope was granted, also returns an `id_token`. If `offline_access` scope was granted, also returns a `refresh_token`.
+- **`refresh_token`** — Exchange a refresh token for a new access token + refresh token (rotation). Requires `client_id` + `client_secret`.
 
 Client authentication: provide `client_secret` for confidential clients, or omit for public clients (PKCE-only).
 """,
@@ -184,6 +202,7 @@ async def token(
     code: str = Form(None),
     redirect_uri: str = Form(None),
     code_verifier: str = Form(None),
+    refresh_token: str = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     if grant_type == "client_credentials":
@@ -239,8 +258,46 @@ async def token(
             "scope": auth_code.scope,
         }
 
+        if "offline_access" in granted_scopes:
+            rt, _ = await token_service.issue_refresh_token(
+                db, app, auth_code.user_id, granted_scopes
+            )
+            response_body["refresh_token"] = rt
+
         if "openid" in granted_scopes:
             user = await user_service.get_user_by_id(db, auth_code.user_id)
+            if user:
+                id_token = await token_service.issue_id_token(db, app, user, granted_scopes)
+                response_body["id_token"] = id_token
+
+        return response_body
+
+    elif grant_type == "refresh_token":
+        if not refresh_token or not client_id or not client_secret:
+            return oauth_error(
+                "invalid_request",
+                "refresh_token, client_id, and client_secret are required",
+            )
+
+        app = await token_service.authenticate_client(db, client_id, client_secret)
+        if not app:
+            return oauth_error("invalid_client", "Invalid client credentials", 401)
+
+        result = await token_service.exchange_refresh_token(db, refresh_token, client_id)
+        if not result:
+            return oauth_error("invalid_grant", "Invalid or expired refresh token")
+
+        response_body = {
+            "access_token": result["access_token"],
+            "refresh_token": result["refresh_token"],
+            "token_type": "Bearer",
+            "expires_in": result["expires_in"],
+            "scope": result["scope"],
+        }
+
+        granted_scopes = result["scope"].split() if result["scope"] else []
+        if "openid" in granted_scopes:
+            user = await user_service.get_user_by_id(db, result["user_id"])
             if user:
                 id_token = await token_service.issue_id_token(db, app, user, granted_scopes)
                 response_body["id_token"] = id_token
@@ -250,7 +307,7 @@ async def token(
     else:
         return oauth_error(
             "unsupported_grant_type",
-            "Supported: client_credentials, authorization_code",
+            "Supported: client_credentials, authorization_code, refresh_token",
         )
 
 
@@ -261,7 +318,7 @@ async def token(
 
 Requires a valid Bearer token in the `Authorization` header. The token must have been issued via the `authorization_code` grant (tokens from `client_credentials` have no user context and will be rejected).
 
-**Claims by scope:** `openid` → sub | `email` → email, email_verified | `profile` → name, picture, bio | `cohort` → cohort | `socials` → socials | `wallet` → wallet_address | `activity` → posts_count, streak_days, last_active.
+**Claims by scope:** `openid` → sub | `email` → email, email_verified | `profile` → name, picture | `roles` → roles | `date_joined` → date_joined.
 """,
     responses={
         200: {"description": "User claims object (scope-gated)."},
@@ -292,28 +349,28 @@ async def userinfo(
     scopes = introspection.get("scope", "").split()
     claims = {"sub": str(user.id)}
 
-    if "email" in scopes:
-        claims["email"] = user.email
-        claims["email_verified"] = True
+    # Check which claims need live Discord data
+    discord_claim_names = await claim_service.get_discord_claim_names(db)
+    discord_data = None
 
-    if "profile" in scopes:
-        claims["name"] = user.display_name
-        claims["picture"] = user.avatar_url
-        claims["bio"] = user.bio
+    # Fetch live Discord data if any requested claims are Discord-sourced
+    if discord_claim_names and getattr(user, "discord_id", None):
+        discord_data = await discord_service.get_live_member_data(user.discord_id)
 
-    if "cohort" in scopes:
-        claims["cohort"] = user.cohort
+    # Use live Discord roles for role-gated scope resolution
+    user_roles = discord_data.get("roles") if discord_data else None
 
-    if "socials" in scopes:
-        claims["socials"] = user.socials or {}
-
-    if "wallet" in scopes:
-        claims["wallet_address"] = user.wallet_address
-
-    if "activity" in scopes:
-        claims["posts_count"] = 42
-        claims["streak_days"] = 7
-        claims["last_active"] = user.updated_at.isoformat() if user.updated_at else None
+    # Resolve claims dynamically from DB-defined scopes
+    claim_names = await scope_service.get_claims_for_scopes(
+        db, scopes, user_roles=user_roles
+    )
+    resolved = resolve_claims(
+        user,
+        [c for c in claim_names if c != "sub"],
+        discord_data=discord_data,
+        discord_claim_names=discord_claim_names,
+    )
+    claims.update(resolved)
 
     return claims
 

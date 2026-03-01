@@ -34,7 +34,9 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.listApps().then(setApps).finally(() => setLoading(false))
+    api.listApps()
+      .then(setApps)
+      .finally(() => setLoading(false))
   }, [])
 
   return (

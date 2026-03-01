@@ -11,7 +11,7 @@ class OAuthAppCreate(BaseModel):
     """Request body for creating a new OAuth application."""
     name: str = Field(..., description="Display name of the application.", examples=["My Cool App"])
     description: Optional[str] = Field(None, description="Short description of the application.", examples=["A demo OAuth client for testing."])
-    scopes: List[str] = Field([], description="Requested OAuth scopes. Validated against available scopes: openid, profile, email, cohort, activity, socials, wallet, offline_access.", examples=[["openid", "email", "profile"]])
+    scopes: List[str] = Field([], description="Requested OAuth scopes. Validated against available scopes: openid, profile, email, roles, date_joined, offline_access.", examples=[["openid", "email", "profile"]])
     redirect_uris: List[str] = Field([], description="Allowed OAuth callback URLs.", examples=[["https://myapp.example.com/callback"]])
     icon_url: Optional[str] = Field(None, description="URL to the app icon (set via icon upload endpoint).")
     privacy_policy_url: Optional[str] = Field(None, description="URL to the app's privacy policy.", examples=["https://myapp.example.com/privacy"])
@@ -37,6 +37,7 @@ class OAuthAppResponse(BaseModel):
     redirect_uris: List[str] = Field(..., description="Registered callback URLs.")
     icon_url: Optional[str] = Field(None, description="App icon URL path.")
     privacy_policy_url: Optional[str] = Field(None, description="Privacy policy URL.")
+    status: str = Field("pending", description="Approval status: pending, approved, or rejected.")
     created_at: datetime = Field(..., description="UTC creation timestamp.")
     updated_at: datetime = Field(..., description="UTC last-updated timestamp.")
 

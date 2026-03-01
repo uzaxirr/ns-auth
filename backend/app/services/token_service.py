@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from jose import jwt
@@ -11,8 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.access_token import AccessToken
 from app.models.oauth_app import OAuthApp
+from app.models.refresh_token import RefreshToken
 from app.security.hashing import hash_token, verify_client_secret
 from app.security.keys import get_kid, get_private_key
+from app.services import claim_service, discord_service, scope_service
+from app.services.claim_resolver import resolve_claims
 
 
 async def authenticate_client(db: AsyncSession, client_id: str, client_secret: str) -> Optional[OAuthApp]:
@@ -138,32 +142,118 @@ async def issue_id_token(
         "iat": int(now.timestamp()),
     }
 
-    if "email" in granted_scopes:
-        claims["email"] = user.email
-        claims["email_verified"] = True
+    # Check which claims need live Discord data
+    discord_claim_names = await claim_service.get_discord_claim_names(db)
+    discord_data = None
 
-    if "profile" in granted_scopes:
-        claims["name"] = user.display_name
-        claims["picture"] = user.avatar_url
+    if discord_claim_names and getattr(user, "discord_id", None):
+        discord_data = await discord_service.get_live_member_data(user.discord_id)
 
-    if "cohort" in granted_scopes:
-        claims["cohort"] = user.cohort
+    # Use live Discord roles for role-gated scope resolution
+    user_roles = discord_data.get("roles") if discord_data else None
 
-    if "wallet" in granted_scopes:
-        claims["wallet_address"] = user.wallet_address
+    # Resolve claims dynamically from DB-defined scopes
+    claim_names = await scope_service.get_claims_for_scopes(
+        db, granted_scopes, user_roles=user_roles
+    )
+    # Don't overwrite the JWT standard claims (sub is already set)
+    resolved = resolve_claims(
+        user,
+        [c for c in claim_names if c != "sub"],
+        discord_data=discord_data,
+        discord_claim_names=discord_claim_names,
+    )
+    claims.update(resolved)
 
     private_key = get_private_key()
     return jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": get_kid()})
 
 
-async def revoke_token(db: AsyncSession, token: str) -> bool:
-    token_h = hash_token(token)
-    result = await db.execute(select(AccessToken).where(AccessToken.token_hash == token_h))
+async def issue_refresh_token(
+    db: AsyncSession, app: OAuthApp, user_id: uuid.UUID, granted_scopes: List[str]
+) -> Tuple[str, int]:
+    token_value = secrets.token_urlsafe(48)
+    jti = str(uuid.uuid4())
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.refresh_token_expiry_seconds)
+
+    record = RefreshToken(
+        token_hash=hash_token(token_value),
+        jti=jti,
+        client_id=app.client_id,
+        user_id=user_id,
+        scopes=granted_scopes,
+        expires_at=expires_at,
+        revoked=False,
+    )
+    db.add(record)
+    await db.commit()
+
+    return token_value, settings.refresh_token_expiry_seconds
+
+
+async def exchange_refresh_token(
+    db: AsyncSession, refresh_token_str: str, client_id: str
+) -> Optional[Dict]:
+    token_h = hash_token(refresh_token_str)
+    result = await db.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == token_h)
+    )
     record = result.scalar_one_or_none()
 
     if not record:
+        return None
+    if record.revoked:
+        return None
+    if record.expires_at < datetime.now(timezone.utc):
+        return None
+    if record.client_id != client_id:
+        return None
+
+    # Revoke old refresh token (rotation)
+    record.revoked = True
+    await db.flush()
+
+    # Get the app for issuing new tokens
+    from app.services.app_service import get_app_by_client_id
+    app = await get_app_by_client_id(db, client_id)
+    if not app:
+        return None
+
+    granted_scopes = list(record.scopes) if record.scopes else []
+
+    # Issue new access token
+    access_token, expires_in = await issue_user_token(db, app, record.user_id, granted_scopes)
+
+    # Issue new refresh token (rotation)
+    new_refresh_token, refresh_expires_in = await issue_refresh_token(db, app, record.user_id, granted_scopes)
+
+    return {
+        "access_token": access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "Bearer",
+        "expires_in": expires_in,
+        "scope": " ".join(granted_scopes),
+        "user_id": record.user_id,
+    }
+
+
+async def revoke_token(db: AsyncSession, token: str) -> bool:
+    token_h = hash_token(token)
+
+    # Check access tokens
+    result = await db.execute(select(AccessToken).where(AccessToken.token_hash == token_h))
+    record = result.scalar_one_or_none()
+    if record:
+        record.revoked = True
+        await db.commit()
         return True
 
-    record.revoked = True
-    await db.commit()
+    # Check refresh tokens
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_h))
+    record = result.scalar_one_or_none()
+    if record:
+        record.revoked = True
+        await db.commit()
+        return True
+
     return True

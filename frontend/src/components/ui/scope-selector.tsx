@@ -8,20 +8,28 @@ import {
   Wallet,
   RefreshCw,
   Fingerprint,
+  Shield,
+  Calendar,
   ChevronDown,
+  Key,
+  type LucideIcon,
 } from "lucide-react"
 import type { ScopeDefinition } from "@/lib/api"
+import { ScopeIcon } from "@/components/ui/scope-icon"
 import { cn } from "@/lib/utils"
 
-const SCOPE_ICONS: Record<string, React.ElementType> = {
-  openid: Fingerprint,
-  profile: User,
-  email: Mail,
-  cohort: GraduationCap,
-  activity: Activity,
-  socials: Share2,
-  wallet: Wallet,
-  offline_access: RefreshCw,
+export const LUCIDE_ICON_MAP: Record<string, LucideIcon> = {
+  User,
+  Mail,
+  GraduationCap,
+  Activity,
+  Share2,
+  Wallet,
+  RefreshCw,
+  Fingerprint,
+  Shield,
+  Calendar,
+  Key,
 }
 
 interface ScopeSelectorProps {
@@ -72,7 +80,6 @@ export function ScopeSelector({ available, selected, onChange, disabled }: Scope
       <div className="grid grid-cols-2 gap-2">
         {available.map((scope) => {
           const checked = selected.includes(scope.name)
-          const Icon = SCOPE_ICONS[scope.name]
           const isExpanded = expanded === scope.name
           return (
             <div
@@ -108,7 +115,7 @@ export function ScopeSelector({ available, selected, onChange, disabled }: Scope
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    {Icon && <Icon className={cn("h-3.5 w-3.5", checked ? "text-foreground" : "text-muted-foreground")} />}
+                    <ScopeIcon icon={scope.icon} className={cn("h-3.5 w-3.5", checked ? "text-foreground" : "text-muted-foreground")} />
                     <span className={cn("font-mono text-sm", checked ? "text-foreground" : "text-muted-foreground")}>{scope.name}</span>
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">{scope.description}</p>

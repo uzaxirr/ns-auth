@@ -2,6 +2,49 @@
 
 OAuth 2.0 / OpenID Connect identity provider for Network School ("Sign in with Network School"). Lets third-party apps request NS user data via standard OAuth scopes — the same pattern as "Sign in with Google."
 
+## Purpose & Motive
+
+Network School (NS) is building a developer ecosystem where third-party apps can integrate with NS identity and community data. This OAuth provider is the **single gateway** for that — any app wanting to know "is this person an NS member?" or "what cohort are they in?" goes through this server.
+
+**Why it exists:** NS members use dozens of tools (learning platforms, project trackers, social apps). Without a central identity provider, each app would need its own auth, leading to fragmented identity, no single source of truth for membership/roles, and no way to gate access to NS-only resources. This server solves that by giving every app a standard OAuth interface to verify NS membership and request user data.
+
+**What it enables:**
+- **Membership gating** — Third-party apps can verify a user is a current NS Discord member before granting access
+- **Role-based access** — Discord roles (set by NS admins) flow through as OAuth claims, so apps can offer different features based on a user's NS role
+- **Community data** — Apps can request scopes like `roles`, `profile`, `date_joined` to personalize experiences without each app collecting this data separately
+- **Live data** — Discord-sourced claims (roles, display name, avatar) are fetched live from Discord API with a 5-minute TTL cache, so apps always see current data rather than stale login-time snapshots
+- **Developer self-service** — Anyone can register an OAuth app through the admin dashboard, get credentials, and start integrating
+
+**Who uses it:** NS community builders shipping apps for fellow members, NS core team building internal tools, and eventually external partners building on the NS platform.
+
+## Versioning Strategy
+
+### v1 — Discord-based (current priority)
+Use **Discord OAuth2** as the upstream identity provider. The NS community already lives on Discord with roles and access control in place. DC (core team member #2) will provide bot API keys for additional scope data (roles, membership, etc.). This gives us:
+- Instant access control — Discord roles map to permissions, kick/ban is built-in
+- Faster launch — Discord handles auth infra, we just wrap it
+- Community visibility — apps can be shown in the NS Discord server
+- Membership gating — verify users are NS Discord members before granting access
+
+**v1 flow:** Third-party app → our OAuth server → Discord OAuth2 login → verify NS Discord membership → issue NS tokens → return user data.
+
+### v2 — Standalone NS OAuth (future)
+The full custom identity provider with Privy (email OTP / Google / Apple) as currently built. Balaji vets v1 before greenlighting v2. The existing Privy-based code stays in the repo on a branch for v2.
+
+### What stays the same across v1/v2
+- The **external OAuth interface** — third-party apps always talk to our server (`/oauth/authorize`, `/oauth/token`, `/oauth/userinfo`)
+- RS256 access tokens, PKCE support, scope-gated claims
+- Admin dashboard for registering OAuth apps
+- Demo app demonstrating the flow
+
+### What changes in v1
+- **User authentication**: Privy → Discord OAuth2 (`https://discord.com/oauth2/authorize`)
+- **Identity verification**: Privy DID → Discord user ID + NS server membership check
+- **User data source**: Privy API → Discord API + DC's bot API (for roles, profile, etc.)
+- **Frontend login**: Privy modal → Discord OAuth redirect
+- **User model**: `privy_did` → `discord_id` (minimal — all profile data fetched live from Discord API)
+- **Environment vars**: `OAUTH_PRIVY_*` → `OAUTH_DISCORD_CLIENT_ID`, `OAUTH_DISCORD_CLIENT_SECRET`, `OAUTH_DISCORD_BOT_TOKEN`, `OAUTH_DISCORD_GUILD_ID`
+
 ## Quick Start
 
 ```bash
@@ -47,7 +90,9 @@ demo-app/         Vite + React 19 + TypeScript (OAuth client demo)
 | `POST /oauth/authorize/consent` | User approves/denies — returns JSON `{"redirect_to": "..."}` |
 | `GET /oauth/userinfo` | OIDC UserInfo (Bearer token, scope-gated claims) |
 | `GET /oauth/authorize/info` | Returns app name + scopes for consent UI |
-| `POST /auth/login/privy` | Exchange Privy token for session cookie |
+| `GET /auth/discord` | Redirect to Discord OAuth2 login |
+| `GET /auth/discord/callback` | Discord OAuth2 callback — exchanges code, verifies NS membership, creates session |
+| `POST /auth/login/privy` | **[v2 only]** Exchange Privy token for session cookie |
 | `GET /auth/me` | Current user from session cookie |
 | `POST /apps` | Create OAuth app (returns client_id + client_secret) |
 | `GET /.well-known/openid-configuration` | OIDC discovery |
@@ -59,7 +104,8 @@ demo-app/         Vite + React 19 + TypeScript (OAuth client demo)
 **Authorization Code + PKCE** — user-facing flow:
 1. Client redirects to `/oauth/authorize` with PKCE challenge
 2. Backend checks session → redirects to frontend `/login` or `/consent`
-3. User authenticates via Privy (email OTP / Google / Apple)
+3. **v1**: User authenticates via Discord OAuth2 → backend verifies NS Discord membership
+   **v2**: User authenticates via Privy (email OTP / Google / Apple)
 4. User approves scopes on consent screen
 5. Backend generates auth code → redirects to client callback
 6. Client exchanges code for tokens via `/oauth/token`
@@ -67,22 +113,23 @@ demo-app/         Vite + React 19 + TypeScript (OAuth client demo)
 
 ### Scopes & Claims
 
-Defined in `backend/app/scopes.py`. The userinfo endpoint returns claims based on granted scopes:
+Defined in DB (`scope_definitions` + `claim_definitions` tables). The userinfo endpoint returns claims based on granted scopes:
 
-| Scope | Claims |
-|-------|--------|
-| `openid` | `sub` |
-| `email` | `email`, `email_verified` |
-| `profile` | `name`, `picture`, `bio` |
-| `cohort` | `cohort` |
-| `socials` | `socials` (JSON object: twitter, github, linkedin, website) |
-| `wallet` | `wallet_address` |
-| `activity` | `posts_count`, `streak_days`, `last_active` |
-| `offline_access` | refresh tokens |
+| Scope | Claims | Source |
+|-------|--------|--------|
+| `openid` | `sub` | System |
+| `email` | `email`, `email_verified` | Discord OAuth |
+| `profile` | `name`, `picture`, `discord_username`, `banner_url`, `accent_color`, `public_badges` | Discord API (live, 5-min cache) |
+| `roles` | `roles` | Discord API (live, 5-min cache) |
+| `date_joined` | `date_joined`, `discord_joined_at`, `boosting_since` | System + Discord API |
+| `offline_access` | refresh tokens | — |
+
+No user profile data is stored in the DB. Everything comes live from Discord API.
 
 ### Authentication
 
-- **User auth**: Privy (ES256 JWT verified via JWKS from `auth.privy.io`)
+- **User auth (v1)**: Discord OAuth2 — user logs in via Discord, backend verifies membership in NS Discord server (guild). DC's bot token used for role/member data.
+- **User auth (v2)**: Privy (ES256 JWT verified via JWKS from `auth.privy.io`)
 - **Sessions**: HS256 JWT in httponly cookie (`ns_session`, samesite=lax)
 - **Access tokens**: RS256 JWT (auto-generated RSA keys in `backend/keys/`)
 - **Client auth**: client_secret hashed with bcrypt
@@ -91,9 +138,11 @@ Defined in `backend/app/scopes.py`. The userinfo endpoint returns claims based o
 
 PostgreSQL `oauth_provider` on localhost:5432 (user: system user, no password).
 
-**Tables**: `users`, `oauth_apps`, `access_tokens`, `authorization_codes`, `alembic_version`
+**Tables**: `users`, `oauth_apps`, `access_tokens`, `refresh_tokens`, `authorization_codes`, `scope_definitions`, `claim_definitions`, `alembic_version`
 
-**User model fields**: id (UUID), privy_did, email, display_name, avatar_url, cohort, bio, socials (JSON), wallet_address, created_at, updated_at
+**User model fields**: id (UUID), discord_id, email, is_admin, created_at, updated_at. All profile data (name, avatar, roles, badges, etc.) is fetched live from the Discord API — nothing cached in the DB.
+
+**User model fields (v2)**: id (UUID), privy_did, email, is_admin, created_at, updated_at
 
 **Migrations**: Alembic. Run from `backend/`:
 ```bash
@@ -107,8 +156,8 @@ Alembic uses `psycopg2-binary` (sync) since asyncpg can't run migrations.
 Vite 7 + React 19 + Tailwind CSS v4 + shadcn-style components.
 
 - **Pages**: Dashboard (list apps), CreateApp (register OAuth app with scope selector), AppDetail (credentials, API playground), LoginPage, ConsentPage
-- **Privy integration**: `PrivyProvider.tsx` wraps the app, configured with NS branding (light theme, black accent, ns.com flag logo)
-- **Auto-login**: LoginPage auto-triggers Privy modal on mount (no intermediate "Continue with Privy" button)
+- **Login (v1)**: LoginPage redirects to backend `/auth/discord` which initiates Discord OAuth2 flow. No Privy dependency.
+- **Login (v2)**: `PrivyProvider.tsx` wraps the app, Privy modal auto-triggers on mount
 - **Consent flow**: Fetches app info from backend, shows scope list, posts approval → reads JSON redirect_to (not 302, due to CORS)
 
 Tailwind v4 uses `@tailwindcss/vite` plugin — not the PostCSS config approach.
@@ -131,6 +180,18 @@ Standalone Vite + React app on port 3000. Demonstrates the full "Sign in with Ne
 
 All prefixed with `OAUTH_`:
 
+**v1 (Discord-based):**
+```
+OAUTH_DISCORD_CLIENT_ID=<discord app client id>
+OAUTH_DISCORD_CLIENT_SECRET=<discord app client secret>
+OAUTH_DISCORD_BOT_TOKEN=<DC's bot token for guild/role API access>
+OAUTH_DISCORD_GUILD_ID=<NS discord server ID>
+OAUTH_SESSION_SECRET=<64+ char secret for HS256 session JWTs>
+OAUTH_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
+OAUTH_FRONTEND_URL=http://localhost:5173
+```
+
+**v2 (Privy-based):**
 ```
 OAUTH_PRIVY_APP_ID=<privy app id>
 OAUTH_PRIVY_APP_SECRET=<privy app secret>
@@ -139,7 +200,7 @@ OAUTH_CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
 OAUTH_FRONTEND_URL=http://localhost:5173
 ```
 
-Frontend needs `VITE_PRIVY_APP_ID` and `VITE_API_BASE` in `frontend/.env`.
+Frontend needs `VITE_API_BASE` in `frontend/.env`. (v2 also needs `VITE_PRIVY_APP_ID`.)
 
 ## Key Technical Decisions & Gotchas
 
@@ -147,8 +208,11 @@ Frontend needs `VITE_PRIVY_APP_ID` and `VITE_API_BASE` in `frontend/.env`.
 - **Consent endpoint** returns JSON `{"redirect_to": url}` instead of 302 redirect, because cross-origin fetch with `redirect: "manual"` makes Location header inaccessible (opaque redirect response)
 - **React StrictMode double-mount** — the Callback page uses `useRef(false)` guard to prevent exchanging the one-time-use auth code twice
 - **Pydantic-settings** requires `"env_file": ".env"` in `model_config` to load the `.env` file
-- **Privy JWT** only contains `sub` (DID) — email must be fetched separately from Privy Server API (`GET /api/v1/users/{did}`)
-- **JIT user provisioning**: Users are created on first login via Privy. Email is fetched from Privy API and stored. Profile fields (cohort, bio, socials, wallet) start empty and are filled via seed scripts or admin tools.
+- **Discord OAuth2 scopes (v1)**: Request `identify email guilds.members.read` from Discord. The `guilds.members.read` scope lets us check NS server membership and roles without the bot token for the authenticating user. Bot token is used for additional guild-wide queries.
+- **NS membership gating (v1)**: After Discord login, backend calls Discord API to verify user is a member of the NS guild (`OAUTH_DISCORD_GUILD_ID`). Non-members are rejected.
+- **Discord role → scope mapping (v1)**: DC's bot manages roles. Discord roles flow through as the `roles` claim when the `roles` scope is granted.
+- **[v2] Privy JWT** only contains `sub` (DID) — email must be fetched separately from Privy Server API (`GET /api/v1/users/{did}`)
+- **JIT user provisioning**: Users are created on first login via Discord (v1) or Privy (v2). All profile data comes from Discord — no manually-seeded fields.
 - **RSA keys** auto-generate on first backend startup into `backend/keys/`
 - **Cross-origin session cookies**: In production (HTTPS), session cookies use `SameSite=None; Secure=True` because the frontend and backend are on different Railway domains. Without this, the session cookie won't be sent in cross-origin requests (consent approval, `/auth/me`). The `session_service.py` auto-detects production mode by checking if `settings.issuer` starts with `https`.
 - **`POST /auth/dev/login-as`** endpoint exists for testing — creates sessions without Privy OTP. Remove before production.
@@ -192,14 +256,15 @@ Each service's `rootDirectory` is configured in Railway's service settings (not 
 - `OAUTH_DATABASE_URL_SYNC` — sync PostgreSQL connection string (for Alembic)
 - `OAUTH_ISSUER` — Backend public URL
 - `OAUTH_RSA_PRIVATE_KEY` / `OAUTH_RSA_PUBLIC_KEY` — Base64-encoded PEM keys (production uses env vars, not files)
-- `OAUTH_PRIVY_APP_ID` / `OAUTH_PRIVY_APP_SECRET`
+- `OAUTH_DISCORD_CLIENT_ID` / `OAUTH_DISCORD_CLIENT_SECRET` / `OAUTH_DISCORD_BOT_TOKEN` / `OAUTH_DISCORD_GUILD_ID` **(v1)**
+- `OAUTH_PRIVY_APP_ID` / `OAUTH_PRIVY_APP_SECRET` **(v2)**
 - `OAUTH_SESSION_SECRET`
 - `OAUTH_CORS_ORIGINS` — JSON array of allowed origins (must include frontend + demo-app URLs)
 - `OAUTH_FRONTEND_URL` — Frontend URL for redirects
 
 **Frontend** (`--service frontend`):
 - `VITE_API_BASE` — Backend URL
-- `VITE_PRIVY_APP_ID` — Privy app ID for login modal
+- `VITE_PRIVY_APP_ID` — Privy app ID for login modal **(v2 only)**
 
 **Demo App** (`--service demo-app`):
 - `VITE_OAUTH_SERVER` — Backend URL
@@ -254,15 +319,8 @@ curl -s -X POST "https://backboard.railway.com/graphql/v2" \
 ## Useful Commands
 
 ```bash
-# Create a Privy test user
-curl -X POST "https://auth.privy.io/api/v1/users" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Basic $(echo -n '<app_id>:<app_secret>' | base64)" \
-  -H "privy-app-id: <app_id>" \
-  -d '{"linked_accounts": [{"type": "email", "address": "user@example.com"}]}'
-
-# Seed user profile data
-python3 backend/seed_users.py
+# Test Discord login flow (v1) — open in browser
+open "http://localhost:8000/auth/discord?next=http://localhost:5173"
 
 # Test client_credentials flow
 curl -X POST http://localhost:8000/oauth/token \
@@ -270,4 +328,14 @@ curl -X POST http://localhost:8000/oauth/token \
 
 # Check database
 python3 -c "import psycopg2; conn = psycopg2.connect(dbname='oauth_provider', user='$(whoami)'); ..."
+
+# Seed user profile data
+python3 backend/seed_users.py
+
+# [v2] Create a Privy test user
+curl -X POST "https://auth.privy.io/api/v1/users" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Basic $(echo -n '<app_id>:<app_secret>' | base64)" \
+  -H "privy-app-id: <app_id>" \
+  -d '{"linked_accounts": [{"type": "email", "address": "user@example.com"}]}'
 ```

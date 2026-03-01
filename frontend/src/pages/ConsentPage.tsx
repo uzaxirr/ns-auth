@@ -1,15 +1,9 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { API_BASE } from "@/lib/api"
+import { ScopeIcon } from "@/components/ui/scope-icon"
 import {
-  Key,
   User,
-  Mail,
-  GraduationCap,
-  Activity,
-  Globe,
-  Wallet,
-  RefreshCw,
   Loader2,
   AppWindow,
 } from "lucide-react"
@@ -19,70 +13,12 @@ interface AppInfo {
   app_icon_url: string | null
   app_description: string | null
   privacy_policy_url: string | null
-  scopes: Array<{ name: string; description: string; claims: string[] }>
+  scopes: Array<{ name: string; description: string; claims: string[]; icon?: string | null }>
 }
 
 interface UserInfo {
   id: string
   email: string | null
-  display_name: string | null
-  avatar_url: string | null
-  cohort: string | null
-  bio: string | null
-  wallet_address: string | null
-}
-
-const SCOPE_META: Record<
-  string,
-  {
-    icon: typeof Key
-    getValue: (u: UserInfo) => string
-    subtitle: string
-  }
-> = {
-  openid: {
-    icon: Key,
-    getValue: (u) => u.display_name || u.email || u.id.slice(0, 12) + "...",
-    subtitle: "OpenID Connect identity",
-  },
-  profile: {
-    icon: User,
-    getValue: (u) => u.display_name || "Your profile",
-    subtitle: "Name and profile picture",
-  },
-  email: {
-    icon: Mail,
-    getValue: (u) => u.email || "Your email address",
-    subtitle: "Email address",
-  },
-  cohort: {
-    icon: GraduationCap,
-    getValue: (u) => u.cohort || "Your cohort",
-    subtitle: "Cohort information",
-  },
-  activity: {
-    icon: Activity,
-    getValue: () => "Your activity stats",
-    subtitle: "Posts, streaks, and activity",
-  },
-  socials: {
-    icon: Globe,
-    getValue: () => "Your social links",
-    subtitle: "Twitter, GitHub, LinkedIn",
-  },
-  wallet: {
-    icon: Wallet,
-    getValue: (u) =>
-      u.wallet_address
-        ? u.wallet_address.slice(0, 6) + "..." + u.wallet_address.slice(-4)
-        : "Your wallet address",
-    subtitle: "Blockchain wallet",
-  },
-  offline_access: {
-    icon: RefreshCw,
-    getValue: () => "Persistent access",
-    subtitle: "Long-lived refresh tokens",
-  },
 }
 
 export function ConsentPage() {
@@ -160,7 +96,7 @@ export function ConsentPage() {
         <div className="w-full max-w-3xl rounded-2xl border border-border overflow-hidden">
           {/* Branding bar — inside the card */}
           <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
-            <img src="/ns-flag-white.svg" alt="NS" className="h-5 w-auto" />
+            <img src="/ns-flag-white.svg" alt="NS" className="h-5 w-auto invert" />
             <span className="text-sm font-medium text-muted-foreground">
               Sign in with Network School
             </span>
@@ -189,19 +125,11 @@ export function ConsentPage() {
 
               {userInfo && (
                 <div className="mt-6 inline-flex items-center gap-2.5 rounded-full border border-border pl-1 pr-4 py-1 w-fit">
-                  {userInfo.avatar_url ? (
-                    <img
-                      src={userInfo.avatar_url}
-                      alt=""
-                      className="w-7 h-7 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center">
-                      <User className="w-3.5 h-3.5 text-muted-foreground" />
-                    </div>
-                  )}
+                  <div className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center">
+                    <User className="w-3.5 h-3.5 text-muted-foreground" />
+                  </div>
                   <span className="text-sm text-foreground truncate max-w-[180px]">
-                    {userInfo.email || userInfo.display_name || "User"}
+                    {userInfo.email || "User"}
                   </span>
                 </div>
               )}
@@ -224,24 +152,18 @@ export function ConsentPage() {
               {/* Scope items */}
               <div className="space-y-0.5 mb-6">
                 {appInfo?.scopes.map((s) => {
-                  const meta = SCOPE_META[s.name]
-                  const Icon = meta?.icon || Key
-                  const value =
-                    meta && userInfo ? meta.getValue(userInfo) : s.name
-                  const subtitle = meta?.subtitle || s.description
-
                   return (
                     <div
                       key={s.name}
                       className="flex items-start gap-3 py-3 border-b border-border last:border-0"
                     >
-                      <Icon className="w-[18px] h-[18px] text-muted-foreground mt-0.5 shrink-0" />
+                      <ScopeIcon icon={s.icon} className="w-[18px] h-[18px] text-muted-foreground mt-0.5 shrink-0" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">
-                          {value}
+                          {s.name}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {subtitle}
+                          {s.description}
                         </p>
                       </div>
                     </div>

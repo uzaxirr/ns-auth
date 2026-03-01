@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import apps, auth, oauth, scopes, uploads, wellknown
+from app.routers import apps, auth, oauth, scope_admin, scopes, uploads, wellknown
 from app.security.keys import get_private_key
 
 
@@ -36,16 +36,14 @@ Lets third-party apps request NS user data via standard OAuth scopes — the sam
 |-------|--------|
 | `openid` | `sub` |
 | `email` | `email`, `email_verified` |
-| `profile` | `name`, `picture`, `bio` |
-| `cohort` | `cohort` |
-| `socials` | `socials` (JSON: twitter, github, linkedin, website) |
-| `wallet` | `wallet_address` |
-| `activity` | `posts_count`, `streak_days`, `last_active` |
+| `profile` | `name`, `picture` |
+| `roles` | `roles` (Discord roles, live) |
+| `date_joined` | `date_joined` |
 | `offline_access` | refresh tokens |
 
 ## Authentication
 
-- **User auth**: Privy (ES256 JWT verified via JWKS)
+- **User auth**: Discord OAuth2 (NS guild membership required)
 - **Sessions**: HS256 JWT in httponly cookie (`ns_session`)
 - **Access tokens**: RS256 JWT (auto-generated RSA keys)
 - **Client auth**: `client_secret` verified via bcrypt
@@ -59,7 +57,7 @@ Lets third-party apps request NS user data via standard OAuth scopes — the sam
         },
         {
             "name": "auth",
-            "description": "User authentication and session management via Privy.",
+            "description": "User authentication and session management via Discord OAuth2.",
         },
         {
             "name": "apps",
@@ -94,6 +92,7 @@ app.mount("/uploads", StaticFiles(directory=settings.uploads_dir), name="uploads
 app.include_router(apps.router)
 app.include_router(auth.router)
 app.include_router(oauth.router)
+app.include_router(scope_admin.router)
 app.include_router(scopes.router)
 app.include_router(uploads.router)
 app.include_router(wellknown.router)

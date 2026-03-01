@@ -1,0 +1,225 @@
+sequenceDiagram
+    actor Admin as NS Admin
+    actor Dev as Developer
+    actor User as End User
+    participant AdminUI as Admin Dashboard<br/>(React :5173)
+    participant Backend as NS OAuth Server<br/>(FastAPI :8000)
+    participant DB as PostgreSQL
+    participant Discord as Discord<br/>(OAuth2 + API)
+    participant ClientApp as Developer's App
+
+    %% ============================================================
+    %% PART 1 — Admin configures scopes & claims
+    %% ============================================================
+
+    rect rgb(45, 106, 79, 0.08)
+        Note over Admin,Discord: PART 1 — Admin configures scopes & claims
+
+        Admin->>AdminUI: Login via Discord
+        AdminUI->>Backend: GET /auth/discord
+        Backend->>Discord: Discord OAuth2 login
+        Discord-->>Backend: Callback with code
+        Backend->>Discord: Verify NS membership + fetch roles
+        Discord-->>Backend: Member data (must be admin)
+        Backend-->>AdminUI: Set session cookie (ns_session)
+
+        Admin->>AdminUI: Create/edit scope definitions
+        AdminUI->>Backend: POST /api/admin/scopes/<br/>{name, description, claims[], required_roles[]}
+        Backend->>DB: INSERT INTO scope_definitions
+        DB-->>Backend: Scope created
+        Backend-->>AdminUI: 201 ScopeDefinition
+
+        Admin->>AdminUI: Create/edit claim definitions
+        AdminUI->>Backend: POST /api/admin/claims<br/>{name, label, description, source}
+        Backend->>DB: INSERT INTO claim_definitions
+        DB-->>Backend: Claim created
+        Backend-->>AdminUI: 201 ClaimDefinition
+
+        Note over DB: scope_definitions maps scopes → claims<br/>claim_definitions maps claims → data sources<br/>(e.g. "roles" → discord_api, "email" → user_model)
+    end
+
+    %% ============================================================
+    %% PART 2 — Developer registers an OAuth app
+    %% ============================================================
+
+    rect rgb(30, 58, 138, 0.08)
+        Note over Dev,DB: PART 2 — Developer registers an OAuth app
+
+        Dev->>AdminUI: Login via Discord
+        AdminUI->>Backend: GET /auth/discord
+        Backend->>Discord: Discord OAuth2 login
+        Discord-->>Backend: Callback (verify NS membership)
+        Backend-->>AdminUI: Set session cookie
+
+        Dev->>AdminUI: Fill app form: name, redirect_uris,<br/>scopes [openid, profile, email, roles, offline_access]
+        AdminUI->>Backend: POST /api/apps/<br/>{name, scopes[], redirect_uris[]}
+
+        Backend->>DB: Validate scopes against scope_definitions
+        Backend->>Backend: Generate client_id (hex, 32 chars)<br/>Generate client_secret (base64url, 64 chars)<br/>Hash secret with bcrypt
+
+        Backend->>DB: INSERT INTO oauth_apps<br/>(client_id, secret_hash, scopes,<br/>redirect_uris, status="approved")
+
+        Note over Backend: Apps are auto-approved —<br/>usable immediately, no admin gate
+
+        Backend-->>AdminUI: 201 {client_id, client_secret, ...}
+        AdminUI-->>Dev: Show credentials once:<br/>"Save the secret — it won't be shown again"
+    end
+
+    %% ============================================================
+    %% PART 3 — User signs in with "Sign in with Network School"
+    %% ============================================================
+
+    rect rgb(120, 53, 15, 0.08)
+        Note over User,ClientApp: PART 3 — Authorization Code + PKCE flow
+
+        User->>ClientApp: Click "Sign in with Network School"
+
+        ClientApp->>ClientApp: Generate PKCE:<br/>code_verifier = random bytes<br/>code_challenge = base64url(SHA256(verifier))<br/>state = random UUID<br/>Store in sessionStorage
+
+        ClientApp->>Backend: GET /oauth/authorize<br/>?response_type=code&client_id=...&redirect_uri=...<br/>&scope=openid profile email roles offline_access<br/>&state=...&code_challenge=...&code_challenge_method=S256
+
+        Backend->>DB: Validate client_id, redirect_uri, scopes
+
+        alt No valid session cookie
+            Backend-->>User: 302 → /login (frontend)
+
+            Note over User,Discord: Discord OAuth2 login
+
+            AdminUI->>Backend: GET /auth/discord?next=/consent?{params}
+            Backend-->>User: 302 → discord.com/oauth2/authorize<br/>scope=identify email guilds.members.read
+
+            User->>Discord: Login to Discord
+            Discord-->>Backend: GET /auth/discord/callback?code=...
+
+            Backend->>Discord: POST /oauth2/token (exchange code)
+            Discord-->>Backend: Discord access_token
+
+            Backend->>Discord: GET /users/@me
+            Discord-->>Backend: {id, username, avatar, email}
+
+            Backend->>Discord: GET /users/@me/guilds/{guild_id}/member
+            alt NOT in NS Discord server
+                Discord-->>Backend: 404
+                Backend-->>User: 403 "Not an NS member"
+            end
+            Discord-->>Backend: {roles[], joined_at, nick}
+
+            Backend->>DB: Upsert user (discord_id, username,<br/>avatar, email, roles, display_name)
+
+            Note over DB: JIT provisioning:<br/>New user → INSERT<br/>Returning user → UPDATE Discord fields
+
+            Backend->>Backend: Create session JWT (HS256)<br/>{sub: user_id, exp: +24h}
+            Backend-->>User: 302 → /consent?{params}<br/>+ Set-Cookie: ns_session (httponly)
+        end
+
+        Note over User,Backend: Consent (auto-approved in v1)
+
+        AdminUI->>Backend: GET /oauth/authorize/info?client_id=...&scope=...
+        Backend-->>AdminUI: {app_name, scopes: [{name, description}]}
+
+        AdminUI->>Backend: POST /oauth/authorize/consent<br/>{client_id, redirect_uri, scope, state,<br/>code_challenge, approved: true}<br/>+ cookie: ns_session
+
+        Backend->>Backend: Verify session → get user_id
+        Backend->>DB: INSERT INTO authorization_codes<br/>(code, client_id, user_id, redirect_uri,<br/>scope, code_challenge, expires_at=now+10min)
+        Backend-->>AdminUI: 200 {redirect_to: "{redirect_uri}?code=...&state=..."}
+
+        Note over AdminUI: Returns JSON not 302<br/>(cross-origin fetch can't read Location header)
+
+        AdminUI-->>ClientApp: window.location.href → redirect_to
+    end
+
+    %% ============================================================
+    %% PART 4 — Token exchange
+    %% ============================================================
+
+    rect rgb(88, 28, 135, 0.08)
+        Note over ClientApp,DB: PART 4 — Token exchange
+
+        ClientApp->>ClientApp: Parse ?code=...&state=...<br/>Verify state matches saved state<br/>Retrieve code_verifier from sessionStorage
+
+        ClientApp->>Backend: POST /oauth/token<br/>grant_type=authorization_code<br/>&code=...&redirect_uri=...<br/>&client_id=...&client_secret=...<br/>&code_verifier=...
+
+        Backend->>DB: Authenticate client (bcrypt verify)
+        Backend->>DB: Validate auth code:<br/>not used, not expired, client_id matches,<br/>redirect_uri matches
+        Backend->>Backend: PKCE: SHA256(code_verifier) == code_challenge
+        Backend->>DB: Mark auth code as used
+
+        Backend->>Backend: Issue access_token (RS256 JWT, 1hr)<br/>{iss, sub: user_id, aud: client_id,<br/>scope, exp, iat, jti}
+        Backend->>DB: Store access_token hash
+
+        Backend->>Backend: Issue refresh_token (opaque, 30 days)<br/>secrets.token_urlsafe(48)
+        Backend->>DB: Store refresh_token hash<br/>(token_hash, user_id, client_id, scopes, expiry)
+
+        opt openid in scopes
+            Backend->>Backend: Issue id_token (RS256 JWT)<br/>{sub, email, name, picture, aud, iss}
+        end
+
+        Backend-->>ClientApp: 200 {<br/>  access_token: "eyJ...",<br/>  refresh_token: "abc...",<br/>  id_token: "eyJ...",<br/>  token_type: "Bearer",<br/>  expires_in: 3600,<br/>  scope: "openid profile email roles offline_access"<br/>}
+    end
+
+    %% ============================================================
+    %% PART 5 — Fetch user data
+    %% ============================================================
+
+    rect rgb(15, 98, 89, 0.08)
+        Note over ClientApp,Discord: PART 5 — Fetch user data (scope-gated)
+
+        ClientApp->>Backend: GET /oauth/userinfo<br/>Authorization: Bearer {access_token}
+
+        Backend->>DB: Lookup access_token by SHA256 hash<br/>Verify not revoked, not expired
+        Backend->>DB: Fetch user record
+
+        Backend->>DB: Load scope_definitions → claims mapping<br/>Load claim_definitions → data sources
+
+        Backend->>Discord: GET /guilds/{guild_id}/members/{discord_id}<br/>Authorization: Bot {bot_token}<br/>(cached 5 minutes)
+        Discord-->>Backend: {nick, roles[], avatar, user: {username}}
+
+        Note over Backend: Resolve claims by granted scopes:<br/>openid → sub (user.id)<br/>profile → name (Discord nick), picture (Discord avatar URL)<br/>email → email, email_verified<br/>roles → roles (Discord role names, live)<br/>date_joined → date_joined (user.created_at)
+
+        Backend-->>ClientApp: 200 {<br/>  sub: "uuid",<br/>  name: "Alice",<br/>  picture: "https://cdn.discordapp.com/...",<br/>  email: "alice@example.com",<br/>  email_verified: true,<br/>  roles: ["Member", "Cohort 5"],<br/>  date_joined: "2025-06-15T..."<br/>}
+
+        ClientApp-->>User: Display profile + app content
+    end
+
+    %% ============================================================
+    %% PART 6 — Refresh token rotation
+    %% ============================================================
+
+    rect rgb(127, 29, 29, 0.08)
+        Note over ClientApp,DB: PART 6 — Refresh token (after access_token expires in 1hr)
+
+        ClientApp->>Backend: POST /oauth/token<br/>grant_type=refresh_token<br/>&refresh_token=...&client_id=...&client_secret=...
+
+        Backend->>DB: Authenticate client (bcrypt)
+        Backend->>DB: Lookup refresh_token by SHA256 hash
+        Backend->>Backend: Verify: not revoked, not expired,<br/>client_id matches
+
+        Backend->>DB: Revoke old refresh_token (SET revoked=true)
+
+        Backend->>Backend: Issue new access_token (RS256, 1hr)
+        Backend->>DB: Store new access_token hash
+        Backend->>Backend: Issue new refresh_token (opaque, 30 days)
+        Backend->>DB: Store new refresh_token hash
+
+        Backend-->>ClientApp: 200 {<br/>  access_token: "new_eyJ...",<br/>  refresh_token: "new_abc...",<br/>  expires_in: 3600,<br/>  scope: "..."<br/>}
+
+        Note over ClientApp: MUST discard old refresh_token<br/>and store the new one.<br/>Old token is permanently revoked.
+    end
+
+    %% ============================================================
+    %% PART 7 — Machine-to-machine (client credentials)
+    %% ============================================================
+
+    rect rgb(64, 64, 64, 0.08)
+        Note over ClientApp,DB: PART 7 — Client credentials (machine-to-machine)
+
+        ClientApp->>Backend: POST /oauth/token<br/>grant_type=client_credentials<br/>&client_id=...&client_secret=...&scope=openid
+
+        Backend->>DB: Authenticate client (bcrypt)
+        Backend->>Backend: Issue access_token (RS256, 1hr)<br/>sub=client_id (NOT a user), no user_id
+        Backend->>DB: Store token (user_id=NULL)
+
+        Backend-->>ClientApp: 200 {access_token, expires_in: 3600}<br/>No refresh_token, no id_token
+
+        Note over ClientApp: Cannot call /oauth/userinfo<br/>(no user context).<br/>Use for server-to-server only.
+    end

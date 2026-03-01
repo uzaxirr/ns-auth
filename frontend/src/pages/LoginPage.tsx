@@ -1,55 +1,92 @@
-import { useEffect, useRef } from "react"
-import { useSearchParams, useNavigate } from "react-router-dom"
-import { usePrivy } from "@privy-io/react-auth"
+import { useEffect } from "react"
+import { useSearchParams } from "react-router-dom"
 import { API_BASE } from "@/lib/api"
 
 export function LoginPage() {
   const [searchParams] = useSearchParams()
-  const navigate = useNavigate()
-  const { login, ready, authenticated, getAccessToken } = usePrivy()
-  const triggered = useRef(false)
+  const error = searchParams.get("error")
 
-  // Auto-trigger Privy login modal as soon as SDK is ready
   useEffect(() => {
-    if (ready && !authenticated && !triggered.current) {
-      triggered.current = true
-      login()
-    }
-  }, [ready, authenticated])
+    // If there's an error param, don't redirect — show the error
+    if (error) return
 
-  // Once authenticated, exchange Privy token for session and go to consent
-  useEffect(() => {
-    if (authenticated) {
-      handlePrivyLogin()
-    }
-  }, [authenticated])
+    // Build the "next" URL: back to /oauth/authorize so auto-approve logic runs
+    const authorizeParams = new URLSearchParams()
+    searchParams.forEach((value, key) => {
+      authorizeParams.set(key, value)
+    })
+    const nextUrl = `${API_BASE}/oauth/authorize?${authorizeParams.toString()}`
 
-  async function handlePrivyLogin() {
-    try {
-      const privyToken = await getAccessToken()
-      if (!privyToken) return
+    // Redirect to backend Discord OAuth2 endpoint
+    window.location.href = `${API_BASE}/auth/discord?next=${encodeURIComponent(nextUrl)}`
+  }, [error, searchParams])
 
-      const resp = await fetch(`${API_BASE}/auth/login/privy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ privy_token: privyToken }),
-      })
+  if (error === "not_ns_member") {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="text-center max-w-md">
+          <div className="text-4xl mb-4">🚫</div>
+          <h1 className="text-xl font-semibold text-foreground mb-2">
+            Not a Network School Member
+          </h1>
+          <p className="text-sm text-muted-foreground mb-6">
+            Your Discord account is not a member of the Network School server.
+            You need to join the NS Discord to sign in.
+          </p>
+          <a
+            href="https://discord.gg/networkschool"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block px-4 py-2 bg-[#5865F2] text-white rounded-lg text-sm font-medium hover:bg-[#4752C4] transition-colors mb-3"
+          >
+            Join Network School Discord
+          </a>
+          <br />
+          <button
+            onClick={() => {
+              const retryParams = new URLSearchParams(searchParams)
+              retryParams.delete("error")
+              window.location.href = `${window.location.pathname}?${retryParams.toString()}`
+            }}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    )
+  }
 
-      if (resp.ok) {
-        const consentParams = searchParams.toString()
-        navigate(`/consent?${consentParams}`)
-      }
-    } catch (err) {
-      console.error("Login failed:", err)
-    }
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="text-center max-w-md">
+          <h1 className="text-xl font-semibold text-foreground mb-2">
+            Login Failed
+          </h1>
+          <p className="text-sm text-muted-foreground mb-6">
+            Something went wrong during sign in ({error}).
+          </p>
+          <button
+            onClick={() => {
+              const retryParams = new URLSearchParams(searchParams)
+              retryParams.delete("error")
+              window.location.href = `${window.location.pathname}?${retryParams.toString()}`
+            }}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="text-center">
-        <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-sm text-zinc-400">Connecting to Network School...</p>
+        <div className="w-8 h-8 border-2 border-border border-t-foreground rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-sm text-muted-foreground">Redirecting to Discord...</p>
       </div>
     </div>
   )

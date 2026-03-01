@@ -8,6 +8,9 @@ from sqlalchemy import DateTime, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+# Valid statuses for OAuth app approval workflow
+APP_STATUSES = ("pending", "approved", "rejected")
+
 from app.database import Base
 
 
@@ -23,6 +26,9 @@ class OAuthApp(Base):
     redirect_uris: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     icon_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     privacy_policy_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default="approved", server_default="approved", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

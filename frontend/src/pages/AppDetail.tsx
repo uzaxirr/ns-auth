@@ -351,7 +351,7 @@ export function AppDetail() {
                         href={app.privacy_policy_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm text-blue-400 hover:underline inline-flex items-center gap-1"
+                        className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1"
                       >
                         {app.privacy_policy_url}
                         <ExternalLink className="h-3 w-3" />

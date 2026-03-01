@@ -102,11 +102,11 @@ function DecodedJwtView({ decoded }: { decoded: DecodedJWT }) {
       <div>
         <div className="flex items-center gap-2 mb-2">
           <div className="h-2 w-2 rounded-full bg-blue-400" />
-          <span className="text-xs font-semibold uppercase tracking-wider text-blue-400">Header</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-blue-600">Header</span>
         </div>
         <div className="rounded-lg bg-blue-500/5 border border-blue-500/10 px-4 py-2 divide-y divide-border">
           {Object.entries(header).map(([k, v]) => (
-            <ClaimRow key={k} label={k} value={String(v)} highlight="text-blue-400" />
+            <ClaimRow key={k} label={k} value={String(v)} highlight="text-blue-600" />
           ))}
         </div>
       </div>

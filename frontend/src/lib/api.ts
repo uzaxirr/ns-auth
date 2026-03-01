@@ -2,6 +2,7 @@ export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     ...options,
   })
@@ -14,9 +15,34 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export interface ScopeDefinition {
+  id: string
   name: string
   description: string
   claims: string[]
+  required_roles: string[]
+  icon: string | null
+  sort_order: number
+  is_active: boolean
+  is_system: boolean
+}
+
+export interface ScopeCreate {
+  name: string
+  description: string
+  claims: string[]
+  required_roles?: string[]
+  icon?: string
+  sort_order?: number
+}
+
+export interface ScopeUpdate {
+  name?: string
+  description?: string
+  claims?: string[]
+  required_roles?: string[]
+  icon?: string
+  sort_order?: number
+  is_active?: boolean
 }
 
 export interface OAuthAppCreate {
@@ -46,6 +72,7 @@ export interface OAuthApp {
   redirect_uris: string[]
   icon_url: string | null
   privacy_policy_url: string | null
+  status: string
   created_at: string
   updated_at: string
 }
@@ -72,7 +99,43 @@ export interface IntrospectResponse {
   iss?: string
 }
 
+export interface ClaimDefinition {
+  id: string
+  name: string
+  label: string
+  description: string
+  source: string
+  is_active: boolean
+  created_at: string | null
+}
+
+export interface ClaimCreate {
+  name: string
+  label: string
+  description: string
+  source: string
+}
+
+export interface ClaimUpdate {
+  label?: string
+  description?: string
+  source?: string
+  is_active?: boolean
+}
+
+export interface UserMe {
+  id: string
+  email: string | null
+  is_admin: boolean
+}
+
 export const api = {
+  getMe: () =>
+    fetch(`${API_BASE}/auth/me`, { credentials: "include" }).then(async (res) => {
+      if (!res.ok) return null
+      return res.json() as Promise<UserMe>
+    }),
+
   getScopes: () => request<ScopeDefinition[]>("/api/scopes/"),
 
   createApp: (data: OAuthAppCreate) =>
@@ -135,4 +198,54 @@ export const api = {
 
   deleteAppIcon: (appId: string) =>
     request<OAuthApp>(`/api/apps/${appId}/icon`, { method: "DELETE" }),
+
+  // Admin scope management
+  listAdminScopes: () => request<ScopeDefinition[]>("/api/admin/scopes/"),
+
+  getAvailableClaims: () => request<string[]>("/api/admin/scopes/available-claims"),
+
+  createScope: (data: ScopeCreate) =>
+    request<ScopeDefinition>("/api/admin/scopes/", { method: "POST", body: JSON.stringify(data) }),
+
+  updateScope: (scopeId: string, data: ScopeUpdate) =>
+    request<ScopeDefinition>(`/api/admin/scopes/${scopeId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deactivateScope: (scopeId: string) =>
+    request<ScopeDefinition>(`/api/admin/scopes/${scopeId}`, { method: "DELETE" }),
+
+  uploadScopeIcon: async (scopeId: string, file: File): Promise<ScopeDefinition> => {
+    const formData = new FormData()
+    formData.append("file", file)
+    const res = await fetch(`${API_BASE}/api/admin/scopes/${scopeId}/icon`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || `Upload failed: ${res.status}`)
+    }
+    return res.json()
+  },
+
+  // Admin claim management
+  listAdminClaims: () => request<ClaimDefinition[]>("/api/admin/claims"),
+
+  createClaim: (data: ClaimCreate) =>
+    request<ClaimDefinition>("/api/admin/claims", { method: "POST", body: JSON.stringify(data) }),
+
+  updateClaim: (claimId: string, data: ClaimUpdate) =>
+    request<ClaimDefinition>(`/api/admin/claims/${claimId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deactivateClaim: (claimId: string) =>
+    request<ClaimDefinition>(`/api/admin/claims/${claimId}`, { method: "DELETE" }),
+
+  // Available roles from Discord
+  getAvailableRoles: () => request<string[]>("/api/admin/roles"),
 }
