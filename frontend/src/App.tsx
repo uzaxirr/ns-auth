@@ -6,6 +6,7 @@ import { CreateApp } from "@/pages/CreateApp"
 import { AppDetail } from "@/pages/AppDetail"
 import { LoginPage } from "@/pages/LoginPage"
 import { ConsentPage } from "@/pages/ConsentPage"
+import { DocsPage } from "@/pages/DocsPage"
 import { AdminLayout } from "@/pages/admin/AdminLayout"
 import { ScopeManagement } from "@/pages/admin/ScopeManagement"
 import { ClaimsManagement } from "@/pages/admin/ClaimsManagement"
@@ -15,9 +16,10 @@ function App() {
     <>
       <BrowserRouter>
         <Routes>
-          {/* OAuth flow pages (outside Layout) */}
+          {/* Public pages (outside Layout) */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/consent" element={<ConsentPage />} />
+          <Route path="/docs" element={<DocsPage />} />
 
           {/* Admin dashboard pages */}
           <Route element={<Layout />}>

@@ -4,6 +4,30 @@ OAuth 2.0 / OpenID Connect identity provider for Network School. Lets third-part
 
 Users authenticate via **Discord OAuth2**. The backend verifies they're a member of the NS Discord server, then issues standard OAuth tokens that third-party apps consume.
 
+## Developer Guide
+
+Building an app for Network School? Here's how to integrate:
+
+- **[Developer Docs](https://frontend-production-a6eb.up.railway.app/docs)** — Full integration guide with React and Next.js code snippets, endpoint reference, scopes & claims, and error handling.
+- **[Demo App](https://demo-app-production-9550.up.railway.app)** — Working reference implementation of "Sign in with Network School" (source in `demo-app/`).
+- **[OIDC Discovery](https://backend-production-c59b.up.railway.app/.well-known/openid-configuration)** — Auto-configure your OAuth library with the OIDC discovery endpoint.
+
+Quick steps: Register an app on the [admin dashboard](https://frontend-production-a6eb.up.railway.app), get your `client_id` and `client_secret`, then follow the code examples in the docs.
+
+### OIDC — What is it?
+
+**OpenID Connect (OIDC)** is a standard identity layer on top of OAuth 2.0. OAuth alone handles *authorization* ("this app can access your data"), OIDC adds *authentication* ("this is who the user is").
+
+This server is a full **OIDC provider**. It publishes a [discovery document](https://backend-production-c59b.up.railway.app/.well-known/openid-configuration) that describes all endpoints, supported scopes, and signing keys. Any OIDC-compatible library can auto-configure itself from this one URL:
+
+```
+https://backend-production-c59b.up.railway.app/.well-known/openid-configuration
+```
+
+**For NextAuth / Auth.js users:** Just set `issuer: "https://backend-production-c59b.up.railway.app"` with `type: "oidc"` and NextAuth handles everything — endpoint discovery, PKCE, token verification, and session management. See the [developer docs](https://frontend-production-a6eb.up.railway.app/docs#nextauth) for a complete example.
+
+---
+
 ## Architecture
 
 ```

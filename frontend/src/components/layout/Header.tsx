@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { LogOut, Settings } from "lucide-react"
+import { LogOut, Settings, BookOpen } from "lucide-react"
 import { API_BASE } from "@/lib/api"
 import type { UserMe } from "@/lib/api"
 
@@ -15,9 +15,18 @@ export function Header({ user }: { user: UserMe | null }) {
   return (
     <header className="border-b border-border">
       <div className="container mx-auto flex h-14 items-center justify-between px-4">
-        <Link to="/" className="flex items-center gap-2 font-semibold text-foreground">
-          OAuth
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link to="/" className="flex items-center gap-2 font-semibold text-foreground">
+            OAuth
+          </Link>
+          <Link
+            to="/docs"
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            Docs
+          </Link>
+        </div>
         {user && (
           <div className="flex items-center gap-3">
             {user.is_admin && (
