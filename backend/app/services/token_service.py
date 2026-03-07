@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from jose import jwt
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -129,7 +129,8 @@ async def issue_user_token(
 
 
 async def issue_id_token(
-    db: AsyncSession, app: OAuthApp, user: "User", granted_scopes: List[str]
+    db: AsyncSession, app: OAuthApp, user: "User", granted_scopes: List[str],
+    nonce: Optional[str] = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     exp = int(now.timestamp()) + settings.token_expiry_seconds
@@ -141,6 +142,10 @@ async def issue_id_token(
         "exp": exp,
         "iat": int(now.timestamp()),
     }
+
+    # L4: Include nonce in ID token if provided (OIDC Core S3.1.3.3)
+    if nonce:
+        claims["nonce"] = nonce
 
     # Check which claims need live Discord data
     discord_claim_names = await claim_service.get_discord_claim_names(db)
@@ -170,11 +175,16 @@ async def issue_id_token(
 
 
 async def issue_refresh_token(
-    db: AsyncSession, app: OAuthApp, user_id: uuid.UUID, granted_scopes: List[str]
+    db: AsyncSession, app: OAuthApp, user_id: uuid.UUID, granted_scopes: List[str],
+    family_id: Optional[uuid.UUID] = None,
 ) -> Tuple[str, int]:
     token_value = secrets.token_urlsafe(48)
     jti = str(uuid.uuid4())
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.refresh_token_expiry_seconds)
+
+    # M6: New family for fresh tokens, inherited family for rotations
+    if family_id is None:
+        family_id = uuid.uuid4()
 
     record = RefreshToken(
         token_hash=hash_token(token_value),
@@ -184,6 +194,7 @@ async def issue_refresh_token(
         scopes=granted_scopes,
         expires_at=expires_at,
         revoked=False,
+        family_id=family_id,
     )
     db.add(record)
     await db.commit()
@@ -203,6 +214,14 @@ async def exchange_refresh_token(
     if not record:
         return None
     if record.revoked:
+        # M6: Refresh token reuse detected — revoke entire family (RFC 9700)
+        if record.family_id:
+            await db.execute(
+                update(RefreshToken)
+                .where(RefreshToken.family_id == record.family_id)
+                .values(revoked=True)
+            )
+            await db.commit()
         return None
     if record.expires_at < datetime.now(timezone.utc):
         return None
@@ -224,8 +243,10 @@ async def exchange_refresh_token(
     # Issue new access token
     access_token, expires_in = await issue_user_token(db, app, record.user_id, granted_scopes)
 
-    # Issue new refresh token (rotation)
-    new_refresh_token, refresh_expires_in = await issue_refresh_token(db, app, record.user_id, granted_scopes)
+    # Issue new refresh token (rotation) — inherit family_id
+    new_refresh_token, refresh_expires_in = await issue_refresh_token(
+        db, app, record.user_id, granted_scopes, family_id=record.family_id
+    )
 
     return {
         "access_token": access_token,

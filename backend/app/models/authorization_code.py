@@ -37,6 +37,7 @@ class AuthorizationCode(Base):
         String(10), nullable=True
     )
     state: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    nonce: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

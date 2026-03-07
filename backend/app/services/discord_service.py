@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 DISCORD_API = "https://discord.com/api/v10"
 DISCORD_OAUTH_SCOPES = "identify email guilds.members.read"
 
-# In-memory TTL caches
+# L6: Bounded TTL cache (max 1000 entries, evict oldest on overflow)
+_MEMBER_CACHE_MAX = 1000
 _member_cache = {}  # type: Dict[str, Tuple[float, Dict[str, Any]]]
 _guild_roles_cache = None  # type: Optional[Tuple[float, Dict[str, str]]]
 
@@ -227,6 +228,10 @@ async def get_live_member_data(discord_id: str) -> Optional[Dict[str, Any]]:
         "accent_color": "#{:06x}".format(user_obj["accent_color"]) if user_obj.get("accent_color") else None,
         "public_badges": _parse_public_flags(user_obj.get("public_flags")),
     }
+    # L6: Evict oldest entries if cache is full
+    if len(_member_cache) >= _MEMBER_CACHE_MAX:
+        oldest_key = min(_member_cache, key=lambda k: _member_cache[k][0])
+        del _member_cache[oldest_key]
     _member_cache[discord_id] = (now, result)
     return result
 

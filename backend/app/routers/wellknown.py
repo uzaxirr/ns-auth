@@ -38,7 +38,7 @@ async def oauth_metadata(db: AsyncSession = Depends(get_db)):
         "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
         "grant_types_supported": ["client_credentials", "authorization_code", "refresh_token"],
         "response_types_supported": ["code"],
-        "code_challenge_methods_supported": ["S256", "plain"],
+        "code_challenge_methods_supported": ["S256"],
         "scopes_supported": scope_names,
     }
 
@@ -64,5 +64,5 @@ async def openid_configuration(db: AsyncSession = Depends(get_db)):
         "id_token_signing_alg_values_supported": ["RS256"],
         "scopes_supported": scope_names,
         "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
-        "code_challenge_methods_supported": ["S256", "plain"],
+        "code_challenge_methods_supported": ["S256"],
     }

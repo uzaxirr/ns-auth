@@ -30,6 +30,7 @@ async def create_app(
     redirect_uris: List[str],
     icon_url: Optional[str] = None,
     privacy_policy_url: Optional[str] = None,
+    owner_id: Optional[UUID] = None,
 ) -> Tuple[OAuthApp, str]:
     await _validate_scopes(db, scopes)
     client_id = generate_client_id()
@@ -45,6 +46,7 @@ async def create_app(
         redirect_uris=redirect_uris,
         icon_url=icon_url,
         privacy_policy_url=privacy_policy_url,
+        owner_id=owner_id,
     )
     db.add(app)
     await db.commit()

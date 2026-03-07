@@ -91,7 +91,8 @@ demo-app/         Vite + React 19 + TypeScript (OAuth client demo)
 | `GET /oauth/userinfo` | OIDC UserInfo (Bearer token, scope-gated claims) |
 | `GET /oauth/authorize/info` | Returns app name + scopes for consent UI |
 | `GET /auth/discord` | Redirect to Discord OAuth2 login |
-| `GET /auth/discord/callback` | Discord OAuth2 callback — exchanges code, verifies NS membership, creates session |
+| `GET /auth/discord/callback` | Discord OAuth2 callback — exchanges code, verifies NS membership, creates session code |
+| `POST /auth/session/exchange` | Exchange single-use session code for session JWT (60s TTL) |
 | `POST /auth/login/privy` | **[v2 only]** Exchange Privy token for session cookie |
 | `GET /auth/me` | Current user from session cookie |
 | `POST /apps` | Create OAuth app (returns client_id + client_secret) |
@@ -215,7 +216,7 @@ Frontend needs `VITE_API_BASE` in `frontend/.env`. (v2 also needs `VITE_PRIVY_AP
 - **JIT user provisioning**: Users are created on first login via Discord (v1) or Privy (v2). All profile data comes from Discord — no manually-seeded fields.
 - **RSA keys** auto-generate on first backend startup into `backend/keys/`
 - **Cross-origin session cookies**: In production (HTTPS), session cookies use `SameSite=None; Secure=True` because the frontend and backend are on different Railway domains. Without this, the session cookie won't be sent in cross-origin requests (consent approval, `/auth/me`). The `session_service.py` auto-detects production mode by checking if `settings.issuer` starts with `https`.
-- **`POST /auth/dev/login-as`** endpoint exists for testing — creates sessions without Privy OTP. Remove before production.
+- **Session token relay** uses a single-use intermediate code (not the JWT itself in the URL). After Discord login, backend stores a 60-second session code and redirects to `/auth/session?code=<code>`. The frontend exchanges this code via `POST /auth/session/exchange` to get the session JWT. This prevents tokens from leaking in URLs, browser history, or Referer headers.
 
 ## Deployment (Railway)
 

@@ -21,3 +21,6 @@ demo-app/dist/
 .env
 *.env.local
 .DS_Store
+
+# Security audit (internal only)
+SECURITY-AUDIT.md

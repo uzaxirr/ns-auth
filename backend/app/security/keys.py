@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import os
 from pathlib import Path
 
@@ -10,11 +11,17 @@ from app.config import settings
 _private_pem = None
 _public_pem = None
 _public_key = None
-_kid = "oauth-provider-key-1"
+_kid = None
+
+
+def _derive_kid(public_pem: bytes) -> str:
+    """L3: Derive kid from SHA-256 hash of the public key material."""
+    digest = hashlib.sha256(public_pem).digest()
+    return base64.urlsafe_b64encode(digest[:8]).rstrip(b"=").decode()
 
 
 def _ensure_keys():
-    global _private_pem, _public_pem, _public_key
+    global _private_pem, _public_pem, _public_key, _kid
     if _private_pem is not None:
         return
 
@@ -33,7 +40,8 @@ def _ensure_keys():
             _private_pem = priv_path.read_bytes()
             _public_pem = pub_path.read_bytes()
         else:
-            private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            # L2: 4096-bit RSA keys for new generation
+            private_key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
 
             _private_pem = private_key.private_bytes(
                 serialization.Encoding.PEM,
@@ -50,6 +58,7 @@ def _ensure_keys():
             os.chmod(priv_path, 0o600)
 
     _public_key = serialization.load_pem_public_key(_public_pem)
+    _kid = _derive_kid(_public_pem)
 
 
 def get_private_key() -> bytes:
@@ -65,6 +74,7 @@ def get_public_key():
 
 
 def get_kid() -> str:
+    _ensure_keys()
     return _kid
 
 
@@ -82,7 +92,7 @@ def get_jwks() -> dict:
                 "kty": "RSA",
                 "use": "sig",
                 "alg": "RS256",
-                "kid": _kid,
+                "kid": get_kid(),
                 "n": _int_to_base64url(numbers.n),
                 "e": _int_to_base64url(numbers.e),
             }

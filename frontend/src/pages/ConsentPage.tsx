@@ -40,6 +40,7 @@ export function ConsentPage() {
   const state = searchParams.get("state") || ""
   const codeChallenge = searchParams.get("code_challenge") || ""
   const codeChallengeMethod = searchParams.get("code_challenge_method") || ""
+  const nonce = searchParams.get("nonce") || ""
   const prompt = searchParams.get("prompt") || ""
 
   useEffect(() => {
@@ -102,6 +103,7 @@ export function ConsentPage() {
       state,
       code_challenge: codeChallenge,
       code_challenge_method: codeChallengeMethod,
+      nonce,
       approved: approved ? "true" : "false",
     })
 

@@ -483,7 +483,7 @@ In production, RSA keys are stored as base64-encoded PEM strings in env vars (no
 
 ```bash
 # Generate RSA key pair
-openssl genrsa -out private.pem 2048
+openssl genrsa -out private.pem 4096
 openssl rsa -in private.pem -pubout -out public.pem
 
 # Base64 encode for Railway env vars

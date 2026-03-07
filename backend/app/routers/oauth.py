@@ -6,6 +6,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -15,6 +17,7 @@ from app.services.claim_resolver import resolve_claims
 from app.services.session_service import get_session_user_id
 
 router = APIRouter(prefix="/oauth", tags=["oauth"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 def oauth_error(error: str, description: str, status_code: int = 400) -> JSONResponse:
@@ -42,18 +45,39 @@ async def authorize(
     state: Optional[str] = Query(None),
     code_challenge: Optional[str] = Query(None),
     code_challenge_method: Optional[str] = Query(None),
+    nonce: Optional[str] = Query(None),
     prompt: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     if response_type != "code":
         return oauth_error("unsupported_response_type", "Only 'code' is supported")
 
+    # M1: PKCE required for all authorization code grants (RFC 9700)
+    if not code_challenge:
+        return oauth_error("invalid_request", "code_challenge is required (PKCE)")
+    if code_challenge_method and code_challenge_method != "S256":
+        return oauth_error("invalid_request", "Only S256 code_challenge_method is supported")
+
     app = await app_service.get_app_by_client_id(db, client_id)
     if not app:
         return oauth_error("invalid_client", "Unknown client_id")
 
+    # M4: Only approved apps can authorize (RFC 6749)
+    if app.status != "approved":
+        return oauth_error("invalid_client", "Application is not approved")
+
     if redirect_uri not in app.redirect_uris:
         return oauth_error("invalid_request", "redirect_uri not registered")
+
+    # M2: Validate requested scopes against app's registered scopes (RFC 6749 S3.3)
+    requested_scopes = scope.split() if scope else []
+    if app.scopes:
+        invalid_scopes = [s for s in requested_scopes if s not in app.scopes]
+        if invalid_scopes:
+            return oauth_error(
+                "invalid_scope",
+                f"Scopes not registered for this app: {', '.join(invalid_scopes)}",
+            )
 
     authorize_params = urlencode({
         "response_type": response_type,
@@ -63,6 +87,7 @@ async def authorize(
         "state": state or "",
         "code_challenge": code_challenge or "",
         "code_challenge_method": code_challenge_method or "",
+        "nonce": nonce or "",
         "prompt": prompt or "",
     })
 
@@ -125,6 +150,7 @@ async def authorize_consent(
     state: str = Form(""),
     code_challenge: str = Form(""),
     code_challenge_method: str = Form(""),
+    nonce: str = Form(""),
     approved: bool = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -132,16 +158,27 @@ async def authorize_consent(
     if not user_id:
         return oauth_error("access_denied", "User not authenticated", 401)
 
-    if not approved:
-        params = urlencode({"error": "access_denied", "state": state})
-        return JSONResponse(content={"redirect_to": f"{redirect_uri}?{params}"})
-
+    # H3: Validate redirect_uri BEFORE checking approval (RFC 6749 S4.1.2.1)
     app = await app_service.get_app_by_client_id(db, client_id)
     if not app:
         return oauth_error("invalid_client", "Unknown client_id")
 
     if redirect_uri not in app.redirect_uris:
         return oauth_error("invalid_request", "redirect_uri not registered")
+
+    # M2: Validate requested scopes against app's registered scopes (consent endpoint)
+    requested_scopes = scope.split() if scope else []
+    if app.scopes:
+        invalid_scopes = [s for s in requested_scopes if s not in app.scopes]
+        if invalid_scopes:
+            return oauth_error(
+                "invalid_scope",
+                f"Scopes not registered for this app: {', '.join(invalid_scopes)}",
+            )
+
+    if not approved:
+        params = urlencode({"error": "access_denied", "state": state})
+        return JSONResponse(content={"redirect_to": f"{redirect_uri}?{params}"})
 
     code = await authz_service.create_authorization_code(
         db=db,
@@ -152,6 +189,7 @@ async def authorize_consent(
         state=state or None,
         code_challenge=code_challenge or None,
         code_challenge_method=code_challenge_method or None,
+        nonce=nonce or None,
     )
 
     params = {"code": code}
@@ -177,7 +215,9 @@ Client authentication: provide `client_secret` for confidential clients, or omit
         401: {"description": "Invalid client credentials."},
     },
 )
+@limiter.limit("30/minute")
 async def token(
+    request: Request,
     grant_type: str = Form(...),
     client_id: str = Form(None),
     client_secret: str = Form(None),
@@ -250,7 +290,9 @@ async def token(
         if "openid" in granted_scopes:
             user = await user_service.get_user_by_id(db, auth_code.user_id)
             if user:
-                id_token = await token_service.issue_id_token(db, app, user, granted_scopes)
+                id_token = await token_service.issue_id_token(
+                    db, app, user, granted_scopes, nonce=auth_code.nonce
+                )
                 response_body["id_token"] = id_token
 
         return response_body
@@ -366,12 +408,21 @@ async def userinfo(
         200: {"description": "Introspection result with `active` boolean and token metadata."},
     },
 )
+@limiter.limit("30/minute")
 async def introspect(
+    request: Request,
     token: str = Form(...),
     client_id: str = Form(None),
     client_secret: str = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
+    # H1: Client auth required (RFC 7662 S2.1)
+    if not client_id or not client_secret:
+        return oauth_error("invalid_client", "client_id and client_secret required", 401)
+    app = await token_service.authenticate_client(db, client_id, client_secret)
+    if not app:
+        return oauth_error("invalid_client", "Invalid client credentials", 401)
+
     result = await token_service.introspect_token(db, token)
     return result
 
@@ -384,11 +435,20 @@ async def introspect(
         200: {"description": "Empty JSON `{}`. Token is revoked (or was already invalid)."},
     },
 )
+@limiter.limit("30/minute")
 async def revoke(
+    request: Request,
     token: str = Form(...),
     client_id: str = Form(None),
     client_secret: str = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
+    # H2: Client auth required (RFC 7009 S2.1)
+    if not client_id or not client_secret:
+        return oauth_error("invalid_client", "client_id and client_secret required", 401)
+    app = await token_service.authenticate_client(db, client_id, client_secret)
+    if not app:
+        return oauth_error("invalid_client", "Invalid client credentials", 401)
+
     await token_service.revoke_token(db, token)
     return {}

@@ -7,11 +7,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.access_token import AccessToken
 from app.models.authorization_code import AuthorizationCode
+from app.models.refresh_token import RefreshToken
 
 
 def _generate_code() -> str:
@@ -27,6 +29,7 @@ async def create_authorization_code(
     state: Optional[str] = None,
     code_challenge: Optional[str] = None,
     code_challenge_method: Optional[str] = None,
+    nonce: Optional[str] = None,
 ) -> str:
     code = _generate_code()
     expires_at = datetime.now(timezone.utc) + timedelta(
@@ -42,6 +45,7 @@ async def create_authorization_code(
         state=state,
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
+        nonce=nonce,
         expires_at=expires_at,
     )
     db.add(record)
@@ -64,6 +68,24 @@ async def exchange_authorization_code(
     if not record:
         return None
     if record.used:
+        # M5: Auth code replay — revoke all tokens for this client+user (RFC 6749 S10.5)
+        await db.execute(
+            update(AccessToken)
+            .where(
+                AccessToken.client_id == record.client_id,
+                AccessToken.user_id == record.user_id,
+            )
+            .values(revoked=True)
+        )
+        await db.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.client_id == record.client_id,
+                RefreshToken.user_id == record.user_id,
+            )
+            .values(revoked=True)
+        )
+        await db.commit()
         return None
     if record.client_id != client_id:
         return None
@@ -81,10 +103,8 @@ async def exchange_authorization_code(
             expected = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
             if expected != record.code_challenge:
                 return None
-        elif record.code_challenge_method == "plain":
-            if code_verifier != record.code_challenge:
-                return None
         else:
+            # L1: Only S256 allowed (plain removed per RFC 9700)
             return None
 
     record.used = True

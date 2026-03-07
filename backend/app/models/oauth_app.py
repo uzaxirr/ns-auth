@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,9 @@ class OAuthApp(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     client_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     client_secret_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    owner_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     scopes: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     redirect_uris: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     icon_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

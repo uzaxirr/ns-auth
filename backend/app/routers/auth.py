@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models.oauth_state import OAuthState
+from app.models.session_code import SessionCode
 from app.services import discord_service, user_service
 from app.services.session_service import (
     create_session_token,
@@ -25,6 +26,7 @@ from app.services.session_service import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 STATE_TTL = timedelta(minutes=10)
+SESSION_CODE_TTL = timedelta(seconds=60)  # codes expire fast — single-use relay
 
 
 class UserResponse(BaseModel):
@@ -55,6 +57,17 @@ async def discord_login(
     db: AsyncSession = Depends(get_db),
 ):
     next_url = request.query_params.get("next", settings.frontend_url)
+
+    # C3: Validate next_url to prevent open redirect (RFC 6819 S4.2.4)
+    allowed_origin = urlparse(settings.frontend_url)
+    parsed_next = urlparse(next_url)
+    if parsed_next.scheme and parsed_next.netloc:
+        if (parsed_next.scheme != allowed_origin.scheme or
+                parsed_next.netloc != allowed_origin.netloc):
+            next_url = settings.frontend_url
+    elif not next_url.startswith("/"):
+        next_url = settings.frontend_url
+
     state = secrets.token_urlsafe(32)
 
     # Clean up expired states opportunistically
@@ -169,20 +182,65 @@ async def discord_callback(
     # Invalidate cached Discord data so fresh login data takes effect
     discord_service.invalidate_member_cache(discord_id)
 
-    # Create session token
-    session_token = create_session_token(user.id)
+    # C2: Use a single-use code instead of putting the session token in the URL.
+    # The frontend exchanges this code via POST /auth/session/exchange.
+    session_code = secrets.token_urlsafe(32)
+    db.add(SessionCode(
+        code=session_code,
+        user_id=user.id,
+        expires_at=datetime.now(timezone.utc) + SESSION_CODE_TTL,
+    ))
+    await db.commit()
 
-    # Token relay: pass session token to frontend via URL so it can store
-    # it in localStorage. This avoids cross-origin cookie issues when the
-    # frontend and backend are on different domains (e.g. Railway).
     from urllib.parse import quote
     relay_url = (
         f"{settings.frontend_url}/auth/session"
-        f"?token={session_token}"
+        f"?code={session_code}"
         f"&next={quote(next_url, safe='')}"
     )
-    response = RedirectResponse(url=relay_url, status_code=302)
-    # Also set cookie as fallback (works when same-origin)
+    return RedirectResponse(url=relay_url, status_code=302)
+
+
+class SessionCodeExchange(BaseModel):
+    code: str
+
+
+@router.post(
+    "/session/exchange",
+    summary="Exchange a session relay code for a session token",
+    description="Accepts a single-use code (from the Discord login redirect) and returns a session JWT. The code expires after 60 seconds and can only be used once.",
+    responses={
+        200: {"description": "Session token returned."},
+        400: {"description": "`invalid_code` — code missing, expired, or already used."},
+    },
+)
+async def exchange_session_code(
+    body: SessionCodeExchange,
+    db: AsyncSession = Depends(get_db),
+):
+    # Look up and validate the code
+    result = await db.execute(
+        select(SessionCode).where(
+            SessionCode.code == body.code,
+            SessionCode.expires_at >= datetime.now(timezone.utc),
+        )
+    )
+    session_code = result.scalar_one_or_none()
+    if not session_code:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_code"},
+        )
+
+    user_id = session_code.user_id
+
+    # Consume — single-use
+    await db.delete(session_code)
+    await db.commit()
+
+    # Create session token and set cookie
+    session_token = create_session_token(user_id)
+    response = JSONResponse(content={"token": session_token})
     set_session_cookie(response, session_token)
     return response
 
@@ -222,35 +280,3 @@ async def logout():
     clear_session_cookie(response)
     return response
 
-
-# DEV ONLY — remove before production
-@router.post(
-    "/dev/login-as",
-    summary="[DEV] Login as any user by email",
-    description="**Development/testing only.** Creates a session for a user by email without authentication. Remove before production.",
-    responses={
-        200: {"description": "User object. Sets `ns_session` cookie."},
-        400: {"description": "`email required`."},
-        404: {"description": "`user not found`."},
-    },
-)
-async def dev_login_as(
-    body: dict,
-    db: AsyncSession = Depends(get_db),
-):
-    """Create a session for a user by email. Dev/testing only."""
-    from app.models.user import User
-    from sqlalchemy import select
-    email = body.get("email")
-    if not email:
-        return JSONResponse(status_code=400, content={"error": "email required"})
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-    if not user:
-        return JSONResponse(status_code=404, content={"error": "user not found"})
-    session_token = create_session_token(user.id)
-    response = JSONResponse(content={
-        "user": UserResponse.from_user(user).model_dump()
-    })
-    set_session_cookie(response, session_token)
-    return response

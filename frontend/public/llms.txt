@@ -56,8 +56,8 @@ Proof Key for Code Exchange (pronounced "pixy") prevents a class of attacks wher
 | GET | `/oauth/authorize` | Start authorization code flow |
 | POST | `/oauth/token` | Exchange code/credentials for tokens |
 | GET | `/oauth/userinfo` | Get user claims (Bearer token required) |
-| POST | `/oauth/token/introspect` | Check if a token is active |
-| POST | `/oauth/token/revoke` | Revoke an access token |
+| POST | `/oauth/token/introspect` | Check if a token is active (client_id + client_secret required) |
+| POST | `/oauth/token/revoke` | Revoke an access token (client_id + client_secret required) |
 | GET | `/.well-known/openid-configuration` | Server discovery document |
 | GET | `/.well-known/jwks.json` | Public RSA keys for token verification |
 
@@ -558,7 +558,7 @@ NS Auth publishes a discovery document at `https://api.nsauth.org/.well-known/op
     "openid", "profile", "email",
     "roles", "date_joined", "offline_access"
   ],
-  "code_challenge_methods_supported": ["S256", "plain"]
+  "code_challenge_methods_supported": ["S256"]
 }
 ```
 

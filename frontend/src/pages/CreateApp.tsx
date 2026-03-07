@@ -216,7 +216,7 @@ export function CreateApp() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                accept="image/png,image/jpeg,image/gif,image/webp"
                 onChange={handleIconSelect}
                 className="hidden"
               />
@@ -240,7 +240,7 @@ export function CreateApp() {
                   className="flex items-center gap-2 rounded-md border border-dashed border-input px-4 py-3 text-sm text-muted-foreground hover:border-ring hover:text-foreground transition-colors w-full"
                 >
                   <Upload className="h-4 w-4" />
-                  Upload an icon (png, jpg, gif, webp, svg — max 2 MB)
+                  Upload an icon (png, jpg, gif, webp — max 2 MB)
                 </button>
               )}
             </div>

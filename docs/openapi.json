@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Network School OAuth Provider",
-    "description": "OAuth 2.0 / OpenID Connect identity provider for Network School.\n\nLets third-party apps request NS user data via standard OAuth scopes \u2014 the same pattern as \"Sign in with Google.\"\n\n## Flows\n\n- **Authorization Code + PKCE** \u2014 user-facing \"Sign in with Network School\" flow\n- **Client Credentials** \u2014 machine-to-machine, no user context\n\n## Scopes\n\n| Scope | Claims |\n|-------|--------|\n| `openid` | `sub` |\n| `email` | `email`, `email_verified` |\n| `profile` | `name`, `picture`, `bio` |\n| `cohort` | `cohort` |\n| `socials` | `socials` (JSON: twitter, github, linkedin, website) |\n| `wallet` | `wallet_address` |\n| `activity` | `posts_count`, `streak_days`, `last_active` |\n| `offline_access` | refresh tokens |\n\n## Authentication\n\n- **User auth**: Privy (ES256 JWT verified via JWKS)\n- **Sessions**: HS256 JWT in httponly cookie (`ns_session`)\n- **Access tokens**: RS256 JWT (auto-generated RSA keys)\n- **Client auth**: `client_secret` verified via bcrypt\n",
+    "description": "OAuth 2.0 / OpenID Connect identity provider for Network School.\n\nLets third-party apps request NS user data via standard OAuth scopes \u2014 the same pattern as \"Sign in with Google.\"\n\n## Flows\n\n- **Authorization Code + PKCE** \u2014 user-facing \"Sign in with Network School\" flow\n- **Client Credentials** \u2014 machine-to-machine, no user context\n\n## Scopes\n\n| Scope | Claims |\n|-------|--------|\n| `openid` | `sub` |\n| `email` | `email`, `email_verified` |\n| `profile` | `name`, `picture` |\n| `roles` | `roles` (Discord roles, live) |\n| `date_joined` | `date_joined` |\n| `offline_access` | refresh tokens |\n\n## Authentication\n\n- **User auth**: Discord OAuth2 (NS guild membership required)\n- **Sessions**: HS256 JWT in httponly cookie (`ns_session`)\n- **Access tokens**: RS256 JWT (auto-generated RSA keys)\n- **Client auth**: `client_secret` verified via bcrypt\n",
     "license": {
       "name": "Private",
       "url": "https://ns.com/"
@@ -65,6 +65,95 @@
           },
           "400": {
             "description": "Invalid scopes."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apps/pending": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "List pending apps (admin only)",
+        "description": "Returns all apps with status=pending. Requires admin privileges.",
+        "operationId": "list_pending_apps_api_apps_pending_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OAuthAppResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Pending Apps Api Apps Pending Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apps/{app_id}/status": {
+      "patch": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Update app approval status (admin only)",
+        "description": "Set an app's status to approved or rejected. Requires admin privileges.",
+        "operationId": "update_app_status_api_apps__app_id__status_patch",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated app.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAppResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid status."
+          },
+          "403": {
+            "description": "Admin access required."
+          },
+          "404": {
+            "description": "App not found."
           },
           "422": {
             "description": "Validation Error",
@@ -222,19 +311,65 @@
         }
       }
     },
-    "/auth/login/privy": {
+    "/auth/discord": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Redirect to Discord OAuth2 login",
+        "description": "Generates a CSRF state token, stores the `next` URL, and redirects the user to Discord's OAuth2 authorization page. After Discord login, the user is sent to `/auth/discord/callback`.",
+        "operationId": "discord_login_auth_discord_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "302": {
+            "description": "Redirect to Discord OAuth2 authorization page."
+          }
+        }
+      }
+    },
+    "/auth/discord/callback": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Discord OAuth2 callback",
+        "description": "Handles the Discord OAuth2 callback. Validates state, exchanges the authorization code for tokens, fetches the Discord user profile, verifies NS guild membership (rejects non-members), fetches guild roles, creates/updates the user, sets the `ns_session` cookie, and redirects to the stored `next` URL.",
+        "operationId": "discord_callback_auth_discord_callback_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "302": {
+            "description": "Redirect to `next` URL with session cookie set."
+          }
+        }
+      }
+    },
+    "/auth/session/exchange": {
       "post": {
         "tags": [
           "auth"
         ],
-        "summary": "Login with Privy token",
-        "description": "Exchanges a Privy access token (ES256 JWT) for a Network School session. Verifies the token against Privy's JWKS, fetches the user's email from the Privy Server API, creates or retrieves the user (JIT provisioning), and sets an `ns_session` httponly cookie (HS256 JWT).",
-        "operationId": "login_with_privy_auth_login_privy_post",
+        "summary": "Exchange a session relay code for a session token",
+        "description": "Accepts a single-use code (from the Discord login redirect) and returns a session JWT. The code expires after 60 seconds and can only be used once.",
+        "operationId": "exchange_session_code_auth_session_exchange_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PrivyLoginRequest"
+                "$ref": "#/components/schemas/SessionCodeExchange"
               }
             }
           },
@@ -242,15 +377,15 @@
         },
         "responses": {
           "200": {
-            "description": "User object. Sets `ns_session` httponly cookie.",
+            "description": "Session token returned.",
             "content": {
               "application/json": {
                 "schema": {}
               }
             }
           },
-          "401": {
-            "description": "Privy token verification failed."
+          "400": {
+            "description": "`invalid_code` \u2014 code missing, expired, or already used."
           },
           "422": {
             "description": "Validation Error",
@@ -302,54 +437,6 @@
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/dev/login-as": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "[DEV] Login as any user by email",
-        "description": "**Development/testing only.** Creates a session for a user by email without Privy authentication. Remove before production.",
-        "operationId": "dev_login_as_auth_dev_login_as_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "User object. Sets `ns_session` cookie.",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "400": {
-            "description": "`email required`."
-          },
-          "404": {
-            "description": "`user not found`."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
               }
             }
           }
@@ -448,6 +535,38 @@
                 }
               ],
               "title": "Code Challenge Method"
+            }
+          },
+          {
+            "name": "nonce",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Nonce"
+            }
+          },
+          {
+            "name": "prompt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Prompt"
             }
           }
         ],
@@ -585,7 +704,7 @@
           "oauth"
         ],
         "summary": "Exchange credentials for tokens",
-        "description": "Token endpoint supporting two grant types:\n\n- **`client_credentials`** \u2014 Machine-to-machine. Requires `client_id` + `client_secret`. Returns an access token with no user context.\n- **`authorization_code`** \u2014 User-facing. Exchanges an authorization code (from `/oauth/authorize/consent`) for an access token. Supports PKCE (`code_verifier`). If `openid` scope was granted, also returns an `id_token`.\n\nClient authentication: provide `client_secret` for confidential clients, or omit for public clients (PKCE-only).",
+        "description": "Token endpoint supporting three grant types:\n\n- **`client_credentials`** \u2014 Machine-to-machine. Requires `client_id` + `client_secret`. Returns an access token with no user context.\n- **`authorization_code`** \u2014 User-facing. Exchanges an authorization code (from `/oauth/authorize/consent`) for an access token. Supports PKCE (`code_verifier`). If `openid` scope was granted, also returns an `id_token`. If `offline_access` scope was granted, also returns a `refresh_token`.\n- **`refresh_token`** \u2014 Exchange a refresh token for a new access token + refresh token (rotation). Requires `client_id` + `client_secret`.\n\nClient authentication: provide `client_secret` for confidential clients, or omit for public clients (PKCE-only).",
         "operationId": "token_oauth_token_post",
         "requestBody": {
           "content": {
@@ -631,7 +750,7 @@
           "oauth"
         ],
         "summary": "Get user claims (OIDC UserInfo)",
-        "description": "Returns user claims based on the scopes granted to the access token.\n\nRequires a valid Bearer token in the `Authorization` header. The token must have been issued via the `authorization_code` grant (tokens from `client_credentials` have no user context and will be rejected).\n\n**Claims by scope:** `openid` \u2192 sub | `email` \u2192 email, email_verified | `profile` \u2192 name, picture, bio | `cohort` \u2192 cohort | `socials` \u2192 socials | `wallet` \u2192 wallet_address | `activity` \u2192 posts_count, streak_days, last_active.",
+        "description": "Returns user claims based on the scopes granted to the access token.\n\nRequires a valid Bearer token in the `Authorization` header. The token must have been issued via the `authorization_code` grant (tokens from `client_credentials` have no user context and will be rejected).\n\n**Claims by scope:** `openid` \u2192 sub | `email` \u2192 email, email_verified | `profile` \u2192 name, picture | `roles` \u2192 roles | `date_joined` \u2192 date_joined.",
         "operationId": "userinfo_oauth_userinfo_get",
         "responses": {
           "200": {
@@ -728,13 +847,398 @@
         }
       }
     },
+    "/api/admin/scopes/": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List all scopes (admin)",
+        "description": "Returns all scope definitions including inactive ones.",
+        "operationId": "list_admin_scopes_api_admin_scopes__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a scope (admin)",
+        "operationId": "create_scope_api_admin_scopes__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/scopes/available-claims": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List available claim names",
+        "description": "Returns all active claim names that can be assigned to scopes.",
+        "operationId": "available_claims_api_admin_scopes_available_claims_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/scopes/{scope_id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update a scope (admin)",
+        "operationId": "update_scope_api_admin_scopes__scope_id__patch",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scope Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopeUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Deactivate a scope (admin)",
+        "operationId": "deactivate_scope_api_admin_scopes__scope_id__delete",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scope Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/scopes/{scope_id}/icon": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Upload a custom icon for a scope",
+        "operationId": "upload_scope_icon_api_admin_scopes__scope_id__icon_post",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scope Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_scope_icon_api_admin_scopes__scope_id__icon_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/claims": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List all claim definitions",
+        "description": "Returns all claim definitions including inactive ones.",
+        "operationId": "list_claims_api_admin_claims_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a claim definition",
+        "operationId": "create_claim_api_admin_claims_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/claims/{claim_id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update a claim definition",
+        "operationId": "update_claim_api_admin_claims__claim_id__patch",
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Claim Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Deactivate a claim definition",
+        "operationId": "deactivate_claim_api_admin_claims__claim_id__delete",
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Claim Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/roles": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List available Discord roles",
+        "description": "Returns all role names from the NS Discord guild via bot API.",
+        "operationId": "list_roles_api_admin_roles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/scopes/": {
       "get": {
         "tags": [
           "scopes"
         ],
         "summary": "List available scopes",
-        "description": "Returns all available OAuth scopes with their descriptions and the claims each scope grants access to.",
+        "description": "Returns all active OAuth scopes with their descriptions, claims, and icons.",
         "operationId": "list_scopes_api_scopes__get",
         "responses": {
           "200": {
@@ -754,7 +1258,7 @@
           "uploads"
         ],
         "summary": "Upload app icon",
-        "description": "Upload an icon for an OAuth app. Accepts PNG, JPEG, GIF, WebP, and SVG. Max file size: 2 MB. Replaces the existing icon if one exists.",
+        "description": "Upload an icon for an OAuth app. Accepts PNG, JPEG, GIF, and WebP. Max file size: 2 MB. Replaces the existing icon if one exists.",
         "operationId": "upload_icon_api_apps__app_id__icon_post",
         "parameters": [
           {
@@ -966,6 +1470,11 @@
             "title": "Code Challenge Method",
             "default": ""
           },
+          "nonce": {
+            "type": "string",
+            "title": "Nonce",
+            "default": ""
+          },
           "approved": {
             "type": "boolean",
             "title": "Approved"
@@ -1050,6 +1559,10 @@
           "code_verifier": {
             "type": "string",
             "title": "Code Verifier"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
           }
         },
         "type": "object",
@@ -1071,6 +1584,105 @@
           "file"
         ],
         "title": "Body_upload_icon_api_apps__app_id__icon_post"
+      },
+      "Body_upload_scope_icon_api_admin_scopes__scope_id__icon_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_scope_icon_api_admin_scopes__scope_id__icon_post"
+      },
+      "ClaimCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Description",
+            "default": ""
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 20,
+            "title": "Source",
+            "default": "model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label"
+        ],
+        "title": "ClaimCreate"
+      },
+      "ClaimUpdate": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "title": "ClaimUpdate"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1116,7 +1728,7 @@
             },
             "type": "array",
             "title": "Scopes",
-            "description": "Requested OAuth scopes. Validated against available scopes: openid, profile, email, cohort, activity, socials, wallet, offline_access.",
+            "description": "Requested OAuth scopes. Validated against available scopes: openid, profile, email, roles, date_joined, offline_access.",
             "default": [],
             "examples": [
               [
@@ -1245,6 +1857,12 @@
             "title": "Privacy Policy Url",
             "description": "Privacy policy URL."
           },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Approval status: pending, approved, or rejected.",
+            "default": "pending"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -1346,6 +1964,12 @@
             ],
             "title": "Privacy Policy Url",
             "description": "Privacy policy URL."
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Approval status: pending, approved, or rejected.",
+            "default": "pending"
           },
           "created_at": {
             "type": "string",
@@ -1458,18 +2082,174 @@
         "title": "OAuthAppUpdate",
         "description": "Request body for partially updating an OAuth application. Only provided fields are changed."
       },
-      "PrivyLoginRequest": {
+      "ScopeCreate": {
         "properties": {
-          "privy_token": {
+          "name": {
             "type": "string",
-            "title": "Privy Token"
+            "maxLength": 50,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Description"
+          },
+          "claims": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Claims"
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Roles"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "sort_order": {
+            "type": "integer",
+            "title": "Sort Order",
+            "default": 0
           }
         },
         "type": "object",
         "required": [
-          "privy_token"
+          "name",
+          "description"
         ],
-        "title": "PrivyLoginRequest"
+        "title": "ScopeCreate"
+      },
+      "ScopeUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "claims": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claims"
+          },
+          "required_roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Roles"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "title": "ScopeUpdate"
+      },
+      "SessionCodeExchange": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "SessionCodeExchange"
+      },
+      "StatusUpdate": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "StatusUpdate"
       },
       "ValidationError": {
         "properties": {
@@ -1513,7 +2293,7 @@
     },
     {
       "name": "auth",
-      "description": "User authentication and session management via Privy."
+      "description": "User authentication and session management via Discord OAuth2."
     },
     {
       "name": "apps",

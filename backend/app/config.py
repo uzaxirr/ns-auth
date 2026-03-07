@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     rsa_public_key: Optional[str] = None  # base64-encoded PEM
 
     # Session management
-    session_secret: str = "change-me-64-chars-minimum-secret-key-for-session-tokens-here!!"
+    session_secret: str  # Required — no default. Set OAUTH_SESSION_SECRET env var.
     session_expiry_seconds: int = 86400  # 24 hours
 
     # Authorization code flow

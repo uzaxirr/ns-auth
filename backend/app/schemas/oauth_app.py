@@ -2,9 +2,27 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Optional
+from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _validate_redirect_uris(uris: List[str]) -> List[str]:
+    """H4: Only allow https:// or http://localhost for dev (RFC 6749 S3.1.2.1)."""
+    for uri in uris:
+        parsed = urlparse(uri)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError(f"Invalid redirect URI: {uri}")
+        is_localhost = parsed.hostname in ("localhost", "127.0.0.1", "[::1]")
+        if parsed.scheme == "https":
+            continue
+        if parsed.scheme == "http" and is_localhost:
+            continue
+        raise ValueError(
+            f"Redirect URI must use https:// (or http://localhost for dev): {uri}"
+        )
+    return uris
 
 
 class OAuthAppCreate(BaseModel):
@@ -16,6 +34,11 @@ class OAuthAppCreate(BaseModel):
     icon_url: Optional[str] = Field(None, description="URL to the app icon (set via icon upload endpoint).")
     privacy_policy_url: Optional[str] = Field(None, description="URL to the app's privacy policy.", examples=["https://myapp.example.com/privacy"])
 
+    @field_validator("redirect_uris")
+    @classmethod
+    def check_redirect_uri_schemes(cls, v: List[str]) -> List[str]:
+        return _validate_redirect_uris(v)
+
 
 class OAuthAppUpdate(BaseModel):
     """Request body for partially updating an OAuth application. Only provided fields are changed."""
@@ -25,6 +48,13 @@ class OAuthAppUpdate(BaseModel):
     redirect_uris: Optional[List[str]] = Field(None, description="New redirect URIs.")
     icon_url: Optional[str] = Field(None, description="New icon URL.")
     privacy_policy_url: Optional[str] = Field(None, description="New privacy policy URL.")
+
+    @field_validator("redirect_uris")
+    @classmethod
+    def check_redirect_uri_schemes(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is not None:
+            return _validate_redirect_uris(v)
+        return v
 
 
 class OAuthAppResponse(BaseModel):

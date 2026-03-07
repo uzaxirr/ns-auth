@@ -37,10 +37,10 @@ class StatusUpdate(BaseModel):
         400: {"description": "Invalid scopes."},
     },
 )
-async def create_app(body: OAuthAppCreate, db: AsyncSession = Depends(get_db), _user: UUID = Depends(require_session)):
+async def create_app(body: OAuthAppCreate, db: AsyncSession = Depends(get_db), user_id: UUID = Depends(require_session)):
     app, client_secret = await app_service.create_app(
         db, body.name, body.description, body.scopes, body.redirect_uris,
-        body.icon_url, body.privacy_policy_url,
+        body.icon_url, body.privacy_policy_url, owner_id=user_id,
     )
     return OAuthAppCreated(
         id=app.id,
@@ -138,7 +138,15 @@ async def get_app(app_id: UUID, db: AsyncSession = Depends(get_db), _user: UUID 
         404: {"description": "App not found."},
     },
 )
-async def update_app(app_id: UUID, body: OAuthAppUpdate, db: AsyncSession = Depends(get_db), _user: UUID = Depends(require_session)):
+async def update_app(app_id: UUID, body: OAuthAppUpdate, db: AsyncSession = Depends(get_db), user_id: UUID = Depends(require_session)):
+    # M3: Ownership check — only owner or admin can update
+    existing = await app_service.get_app(db, app_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="App not found")
+    user = await user_service.get_user_by_id(db, user_id)
+    if existing.owner_id and existing.owner_id != user_id and not (user and user.is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized to modify this app")
+
     app = await app_service.update_app(
         db, app_id,
         name=body.name,
@@ -148,8 +156,6 @@ async def update_app(app_id: UUID, body: OAuthAppUpdate, db: AsyncSession = Depe
         icon_url=body.icon_url,
         privacy_policy_url=body.privacy_policy_url,
     )
-    if not app:
-        raise HTTPException(status_code=404, detail="App not found")
     return app
 
 
@@ -163,7 +169,13 @@ async def update_app(app_id: UUID, body: OAuthAppUpdate, db: AsyncSession = Depe
         404: {"description": "App not found."},
     },
 )
-async def delete_app(app_id: UUID, db: AsyncSession = Depends(get_db), _user: UUID = Depends(require_session)):
-    deleted = await app_service.delete_app(db, app_id)
-    if not deleted:
+async def delete_app(app_id: UUID, db: AsyncSession = Depends(get_db), user_id: UUID = Depends(require_session)):
+    # M3: Ownership check — only owner or admin can delete
+    existing = await app_service.get_app(db, app_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="App not found")
+    user = await user_service.get_user_by_id(db, user_id)
+    if existing.owner_id and existing.owner_id != user_id and not (user and user.is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this app")
+
+    await app_service.delete_app(db, app_id)

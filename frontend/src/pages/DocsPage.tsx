@@ -385,7 +385,7 @@ const OIDC_RESPONSE = `{
     "openid", "profile", "email",
     "roles", "date_joined", "offline_access"
   ],
-  "code_challenge_methods_supported": ["S256", "plain"]
+  "code_challenge_methods_supported": ["S256"]
 }`
 
 /* ── Components ── */
@@ -646,8 +646,8 @@ export function DocsPage() {
                 <EndpointRow method="GET" path="/oauth/authorize" description="Start authorization code flow" />
                 <EndpointRow method="POST" path="/oauth/token" description="Exchange code/credentials for tokens" />
                 <EndpointRow method="GET" path="/oauth/userinfo" description="Get user claims (Bearer token required)" />
-                <EndpointRow method="POST" path="/oauth/token/introspect" description="Check if a token is active" />
-                <EndpointRow method="POST" path="/oauth/token/revoke" description="Revoke an access token" />
+                <EndpointRow method="POST" path="/oauth/token/introspect" description="Check if a token is active (client auth required)" />
+                <EndpointRow method="POST" path="/oauth/token/revoke" description="Revoke an access token (client auth required)" />
                 <EndpointRow method="GET" path="/.well-known/openid-configuration" description="Server discovery document" />
                 <EndpointRow method="GET" path="/.well-known/jwks.json" description="Public RSA keys for token verification" />
               </tbody>
