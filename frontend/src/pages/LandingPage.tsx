@@ -105,6 +105,89 @@ function Reveal({ children, className = "", delay = 0 }: { children: React.React
   )
 }
 
+/* ── Flow diagram helpers ── */
+
+const ACTOR_COLORS = {
+  app: { accent: '#5b9cf5', numBg: 'rgba(91,156,245,0.15)', label: 'Third-Party App' },
+  ns: { accent: '#e8a020', numBg: 'rgba(232,160,32,0.15)', label: 'NS Auth' },
+  discord: { accent: '#5865F2', numBg: 'rgba(88,101,242,0.15)', label: 'Discord' },
+}
+
+function FlowCard({ actor, num, title, desc, success }: {
+  actor: 'app' | 'ns' | 'discord'
+  num: number
+  title: string
+  desc: string
+  success?: boolean
+}) {
+  const c = ACTOR_COLORS[actor]
+  const accent = success ? '#34d399' : c.accent
+  const numBg = success ? 'rgba(52,211,153,0.15)' : c.numBg
+
+  return (
+    <div className={`bg-[#111114] border rounded-2xl p-6 relative overflow-hidden transition-all duration-300 hover:-translate-y-0.5 ${
+      success
+        ? 'border-[rgba(52,211,153,0.25)]'
+        : 'border-[#1e1e25] hover:border-[#2a2a33] hover:shadow-[0_12px_40px_rgba(0,0,0,0.4)]'
+    }`}>
+      <div className="absolute top-0 left-5 right-5 h-0.5 rounded-b-sm opacity-70" style={{ background: accent }} />
+      <span className="sm:hidden text-[10px] font-mono font-medium uppercase tracking-wider mb-2 block" style={{ color: accent }}>
+        {c.label}
+      </span>
+      <div
+        className="inline-flex items-center justify-center w-8 h-8 rounded-full font-mono text-sm font-medium mb-3.5"
+        style={{ background: numBg, color: accent }}
+      >
+        {num}
+      </div>
+      <h3 className="font-semibold text-[17px] leading-tight mb-2 text-white">{title}</h3>
+      <p className="text-sm text-[#9d9daa] leading-relaxed">{desc}</p>
+    </div>
+  )
+}
+
+function FlowArrow({ gridCol, direction, label, color }: {
+  gridCol?: string
+  direction: 'right' | 'left' | 'down'
+  label: string
+  color?: string
+}) {
+  const c = color || '#555'
+
+  if (direction === 'down') {
+    return (
+      <div className="hidden sm:grid grid-cols-3 gap-4 h-12">
+        <div />
+        <div className="flex flex-col items-center justify-center">
+          <div className="w-px h-5" style={{ background: `linear-gradient(to bottom, ${c}, transparent)` }} />
+          <span style={{ color: c }} className="text-sm">↓</span>
+        </div>
+        <div />
+      </div>
+    )
+  }
+
+  return (
+    <div className="hidden sm:grid grid-cols-3 gap-4 h-12">
+      <div className="flex items-center px-8" style={{ gridColumn: gridCol }}>
+        {direction === 'right' ? (
+          <>
+            <div className="flex-1 h-px" style={{ background: `linear-gradient(90deg, ${c}, ${c}15)` }} />
+            <span className="px-2.5 font-mono text-[11px] text-[#5c5c6a] whitespace-nowrap">{label}</span>
+            <span className="text-base" style={{ color: c }}>→</span>
+          </>
+        ) : (
+          <>
+            <span className="text-base" style={{ color: c }}>←</span>
+            <span className="px-2.5 font-mono text-[11px] text-[#5c5c6a] whitespace-nowrap">{label}</span>
+            <div className="flex-1 h-px" style={{ background: `linear-gradient(90deg, ${c}15, ${c})` }} />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ── Page ── */
 
 export function LandingPage() {
@@ -244,6 +327,154 @@ export function LandingPage() {
                 </div>
               </Reveal>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Authentication Flow (dark section) ── */}
+      <section className="bg-[#0a0a0a] text-white py-24 sm:py-32 px-6 relative overflow-hidden">
+        {/* Background orbs */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div
+            className="absolute -top-[200px] left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full opacity-[0.06]"
+            style={{ background: 'radial-gradient(circle, #e8a020, transparent 70%)' }}
+          />
+          <div
+            className="absolute -bottom-[100px] -right-[100px] w-[400px] h-[400px] rounded-full opacity-[0.04]"
+            style={{ background: 'radial-gradient(circle, #5865F2, transparent 70%)' }}
+          />
+        </div>
+
+        <div className="max-w-[1120px] mx-auto relative z-10">
+          <Reveal>
+            <p className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-[#e8a020] mb-4">Authentication Flow</p>
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-14 text-white">What happens when a user signs in</h2>
+          </Reveal>
+
+          {/* Actor headers */}
+          <Reveal delay={0.1}>
+            <div className="hidden sm:grid grid-cols-3 gap-4 pb-5 border-b border-[#1e1e25] mb-8">
+              <div className="text-center py-4">
+                <div
+                  className="w-12 h-12 rounded-[14px] flex items-center justify-center mx-auto mb-3 border"
+                  style={{ background: 'rgba(91,156,245,0.08)', borderColor: 'rgba(91,156,245,0.15)' }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#5b9cf5" strokeWidth="1.5">
+                    <rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+                  </svg>
+                </div>
+                <div className="font-semibold text-base text-white">Third-Party App</div>
+                <div className="font-mono text-[11px] text-[#5c5c6a]">any NS-powered app</div>
+              </div>
+              <div className="text-center py-4">
+                <div
+                  className="w-12 h-12 rounded-[14px] flex items-center justify-center mx-auto mb-3 border"
+                  style={{ background: 'rgba(232,160,32,0.08)', borderColor: 'rgba(232,160,32,0.15)' }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e8a020" strokeWidth="1.5">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                </div>
+                <div className="font-semibold text-base text-white">NS Auth</div>
+                <div className="font-mono text-[11px] text-[#5c5c6a]">identity gateway</div>
+              </div>
+              <div className="text-center py-4">
+                <div
+                  className="w-12 h-12 rounded-[14px] flex items-center justify-center mx-auto mb-3 border"
+                  style={{ background: 'rgba(88,101,242,0.08)', borderColor: 'rgba(88,101,242,0.15)' }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="#5865F2">
+                    <path d="M20.317 4.37a19.79 19.79 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.618-1.25.077.077 0 00-.079-.037A19.74 19.74 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.11 13.11 0 01-1.872-.892.077.077 0 01-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 01.078-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.009c.12.099.246.198.373.292a.077.077 0 01-.006.127 12.3 12.3 0 01-1.873.892.076.076 0 00-.041.107c.36.698.772 1.363 1.225 1.993a.076.076 0 00.084.028 19.84 19.84 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.028zM8.02 15.33c-1.183 0-2.157-1.086-2.157-2.419s.956-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42 0 1.332-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.086-2.157-2.419s.955-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42 0 1.332-.946 2.418-2.157 2.418z" />
+                  </svg>
+                </div>
+                <div className="font-semibold text-base text-white">Discord</div>
+                <div className="font-mono text-[11px] text-[#5c5c6a]">NS community</div>
+              </div>
+            </div>
+          </Reveal>
+
+          {/* Flow steps + connectors */}
+          <div className="pt-2 pb-4 space-y-0">
+
+            {/* Step 1 */}
+            <Reveal>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <FlowCard actor="app" num={1} title='User clicks "Sign in with Network School"' desc="The app shows a branded sign-in button. User clicks it to start authentication." />
+                <div className="hidden sm:block" />
+                <div className="hidden sm:block" />
+              </div>
+            </Reveal>
+            <Reveal><FlowArrow gridCol="1/3" direction="right" label="redirect to NS Auth" color="#5b9cf5" /></Reveal>
+
+            {/* Step 2 */}
+            <Reveal>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="hidden sm:block" />
+                <FlowCard actor="ns" num={2} title="NS Auth validates the request" desc="Checks the app is registered, scopes are valid, and PKCE challenge is present." />
+                <div className="hidden sm:block" />
+              </div>
+            </Reveal>
+            <Reveal><FlowArrow gridCol="2/4" direction="right" label="redirect to Discord" color="#5865F2" /></Reveal>
+
+            {/* Step 3 */}
+            <Reveal>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="hidden sm:block" />
+                <div className="hidden sm:block" />
+                <FlowCard actor="discord" num={3} title="User logs in with Discord" desc="The familiar Discord login screen. User enters credentials or approves access." />
+              </div>
+            </Reveal>
+            <Reveal><FlowArrow gridCol="2/4" direction="left" label="return with identity" color="#9d9daa" /></Reveal>
+
+            {/* Step 4 */}
+            <Reveal>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="hidden sm:block" />
+                <FlowCard actor="ns" num={4} title="NS Auth verifies membership" desc="Confirms the user is a member of the Network School Discord server. Non-members are denied." />
+                <div className="hidden sm:block" />
+              </div>
+            </Reveal>
+            <Reveal><FlowArrow direction="down" label="" color="#e8a020" /></Reveal>
+
+            {/* Step 5 */}
+            <Reveal>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="hidden sm:block" />
+                <FlowCard actor="ns" num={5} title="User approves data sharing" desc="The consent screen shows exactly what data the app is requesting. User reviews and approves." />
+                <div className="hidden sm:block" />
+              </div>
+            </Reveal>
+            <Reveal><FlowArrow gridCol="1/3" direction="left" label="redirect with auth code" color="#34d399" /></Reveal>
+
+            {/* Step 6 */}
+            <Reveal>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <FlowCard actor="app" num={6} title="App exchanges code for tokens" desc="The app securely exchanges the authorization code for access tokens behind the scenes." />
+                <div className="hidden sm:block" />
+                <div className="hidden sm:block" />
+              </div>
+            </Reveal>
+            <Reveal><FlowArrow gridCol="1/3" direction="right" label="fetch user data" color="#5b9cf5" /></Reveal>
+
+            {/* Step 7 */}
+            <Reveal>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="hidden sm:block" />
+                <FlowCard actor="ns" num={7} title="NS Auth returns user data" desc="Profile, email, Discord roles, membership date — all fetched live, scoped to what the user approved." />
+                <div className="hidden sm:block" />
+              </div>
+            </Reveal>
+            <Reveal><FlowArrow gridCol="1/3" direction="left" label="profile, roles, email" color="#34d399" /></Reveal>
+
+            {/* Step 8 */}
+            <Reveal>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <FlowCard actor="app" num={8} title="User is signed in!" desc="The app displays the user's profile, roles, and NS membership data. Authentication complete." success />
+                <div className="hidden sm:block" />
+                <div className="hidden sm:block" />
+              </div>
+            </Reveal>
+
           </div>
         </div>
       </section>
