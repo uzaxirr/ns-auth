@@ -213,14 +213,6 @@ export function LandingPage() {
               >
                 Live Discord Data
               </motion.div>
-              <motion.div
-                initial={{ opacity: 0, x: 12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.5, delay: 0.9 }}
-                className="absolute bottom-6 -right-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-medium text-[#0a0a0a] shadow-sm"
-              >
-                Auto-Discovery
-              </motion.div>
             </div>
           </motion.div>
         </div>
